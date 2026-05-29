@@ -21,11 +21,8 @@ public sealed class BinanceMessageParser : IMessageParser
             return false;
         }
 
-        const long MinUnixMs = -62135596800000L;
-        const long MaxUnixMs = 253402300799999L;
-
         if (dto is null || string.IsNullOrEmpty(dto.Symbol)
-            || dto.EventTimeMs < MinUnixMs || dto.EventTimeMs > MaxUnixMs
+            || dto.EventTimeMs < UnixTime.MinMs || dto.EventTimeMs > UnixTime.MaxMs
             || !decimal.TryParse(dto.Price, NumberStyles.Number, CultureInfo.InvariantCulture, out var price)
             || !decimal.TryParse(dto.Quantity, NumberStyles.Number, CultureInfo.InvariantCulture, out var volume))
         {

@@ -30,6 +30,7 @@ public class KrakenMessageParserTests
     [InlineData("""{"not":"array"}""")]
     [InlineData("""[42,["x","0.25","1700000000.5"],"trade","BTC/USD",1]""")]
     [InlineData("""[42,["50000"],"trade","BTC/USD",1]""")]
+    [InlineData("""[42,["50000.5","0.25","1700000000.5"],"trade","BTC/USD",12345,999]""")]
     public void Rejects_malformed(string raw)
     {
         var parser = new KrakenMessageParser();

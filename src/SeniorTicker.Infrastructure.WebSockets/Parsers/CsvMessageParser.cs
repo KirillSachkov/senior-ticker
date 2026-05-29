@@ -9,10 +9,6 @@ namespace SeniorTicker.Infrastructure.WebSockets.Parsers;
 /// <summary>Парсер CSV-кадра: symbol,price,volume,epochMs,id. Демонстрирует не-JSON формат.</summary>
 public sealed class CsvMessageParser : IMessageParser
 {
-    // Valid range for DateTimeOffset.FromUnixTimeMilliseconds
-    private const long MinUnixMs = -62135596800000L;
-    private const long MaxUnixMs = 253402300799999L;
-
     public bool TryParse(ReadOnlySpan<byte> utf8Frame, DateTimeOffset ingestTimestamp, out Tick tick)
     {
         tick = default;
@@ -31,7 +27,7 @@ public sealed class CsvMessageParser : IMessageParser
         if (!Utf8Parser.TryParse(text[fields[4]], out long id, out _)) return false;
 
         // Guard: epochMs must be in valid DateTimeOffset range before calling FromUnixTimeMilliseconds
-        if (epochMs < MinUnixMs || epochMs > MaxUnixMs) return false;
+        if (epochMs < UnixTime.MinMs || epochMs > UnixTime.MaxMs) return false;
 
         tick = new Tick(Exchange.Coinbase, symbol, price, volume,
             DateTimeOffset.FromUnixTimeMilliseconds(epochMs), id, ingestTimestamp);

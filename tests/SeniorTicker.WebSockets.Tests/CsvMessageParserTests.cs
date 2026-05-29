@@ -29,6 +29,7 @@ public class CsvMessageParserTests
     [InlineData("ETHUSD,3000.25,1.5")]                 // too few fields
     [InlineData("ETHUSD,bad,1.5,1700000000000,1")]     // price not a number
     [InlineData(",3000,1.5,1700000000000,1")]          // empty symbol
+    [InlineData("ETHUSD,3000,1.5,1700000000000,777,extra")] // 6 fields — too many
     public void Rejects_malformed(string raw)
     {
         var parser = new CsvMessageParser();

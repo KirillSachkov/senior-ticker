@@ -11,9 +11,9 @@ namespace SeniorTicker.Infrastructure.WebSockets.Parsers;
 /// </summary>
 public sealed class KrakenMessageParser : IMessageParser
 {
-    // Valid range for DateTimeOffset.FromUnixTimeMilliseconds (argument must be in this range)
-    private const long MinUnixMs = -62135596800000L;
-    private const long MaxUnixMs = 253402300799999L;
+    // Seconds bounds derived from shared UnixTime ms constants (static readonly — decimal division not const-foldable)
+    private static readonly decimal MaxTimeSec = UnixTime.MaxMs / 1000m;
+    private static readonly decimal MinTimeSec = UnixTime.MinMs / 1000m;
 
     public bool TryParse(ReadOnlySpan<byte> utf8Frame, DateTimeOffset ingestTimestamp, out Tick tick)
     {
@@ -45,16 +45,17 @@ public sealed class KrakenMessageParser : IMessageParser
             if (!reader.Read() || reader.TokenType != JsonTokenType.Number || !reader.TryGetInt64(out var tradeId))
                 return false;
 
+            // кадр должен заканчиваться здесь — отвергаем лишние хвостовые элементы
+            if (!reader.Read() || reader.TokenType != JsonTokenType.EndArray) return false;
+
             // Guard against OverflowException on decimal→long cast and out-of-range ms values.
             // timeSec can be huge (e.g. decimal.MaxValue), so check before multiplying.
-            // MaxUnixMs / 1000 ≈ 2.53e11, well within decimal range, so we compare in seconds first.
-            const decimal MaxTimeSec = MaxUnixMs / 1000m;
-            const decimal MinTimeSec = MinUnixMs / 1000m;
+            // MaxTimeSec ≈ 2.53e11, well within decimal range, so we compare in seconds first.
             if (timeSec < MinTimeSec || timeSec > MaxTimeSec) return false;
 
             var ms = (long)(timeSec * 1000m);
             // Double-check after rounding (timeSec*1000 might still land outside bounds at the edges)
-            if (ms < MinUnixMs || ms > MaxUnixMs) return false;
+            if (ms < UnixTime.MinMs || ms > UnixTime.MaxMs) return false;
 
             tick = new Tick(Exchange.Kraken, symbol, price, volume,
                 DateTimeOffset.FromUnixTimeMilliseconds(ms), tradeId, ingestTimestamp);
