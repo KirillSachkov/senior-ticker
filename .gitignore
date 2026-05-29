@@ -1,0 +1,32 @@
+# .NET build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+*.user
+*.suo
+
+# Rider / VS
+.idea/
+.vs/
+*.DotSettings.user
+
+# Test / coverage
+[Tt]est[Rr]esult*/
+coverage*.json
+*.coverage
+*.trx
+
+# Local config / secrets (never commit secrets)
+appsettings.*.local.json
+secrets.json
+*.env
+.env
+
+# OS
+.DS_Store
+
+# dotnet tools / restore
+.packages/
