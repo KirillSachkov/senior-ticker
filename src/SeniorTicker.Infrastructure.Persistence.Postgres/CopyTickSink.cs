@@ -31,9 +31,12 @@ public sealed class CopyTickSink(NpgsqlDataSource dataSource) : ITickSink
             await writer.WriteAsync(t.Symbol, NpgsqlDbType.Varchar, ct).ConfigureAwait(false);
             await writer.WriteAsync(t.Price, NpgsqlDbType.Numeric, ct).ConfigureAwait(false);
             await writer.WriteAsync(t.Volume, NpgsqlDbType.Numeric, ct).ConfigureAwait(false);
-            await writer.WriteAsync(t.ExchangeTimestamp, NpgsqlDbType.TimestampTz, ct).ConfigureAwait(false);
+            // Npgsql binary COPY в timestamptz принимает DateTimeOffset ТОЛЬКО с offset 0 (иначе ArgumentException,
+            // не-OCE → уронил бы write-path). ToUniversalTime() сохраняет инстант, нормализуя offset → робастность
+            // к любому upstream-offset; ровно та instant-семантика, по которой сравнивает TickKey.
+            await writer.WriteAsync(t.ExchangeTimestamp.ToUniversalTime(), NpgsqlDbType.TimestampTz, ct).ConfigureAwait(false);
             await writer.WriteAsync(t.SourceId, NpgsqlDbType.Bigint, ct).ConfigureAwait(false);
-            await writer.WriteAsync(t.IngestTimestamp, NpgsqlDbType.TimestampTz, ct).ConfigureAwait(false);
+            await writer.WriteAsync(t.IngestTimestamp.ToUniversalTime(), NpgsqlDbType.TimestampTz, ct).ConfigureAwait(false);
         }
 
         await writer.CompleteAsync(ct).ConfigureAwait(false); // без Complete COPY откатывается

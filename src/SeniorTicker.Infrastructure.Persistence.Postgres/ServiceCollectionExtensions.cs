@@ -13,10 +13,10 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddPostgresPersistence(this IServiceCollection services, PostgresOptions options)
     {
-        var dataSource = new NpgsqlDataSourceBuilder(options.ConnectionString)
-        {
-            // headroom: writers + EF; защита max_connections (§11)
-        }.Build();
+        var dataSourceBuilder = new NpgsqlDataSourceBuilder(options.ConnectionString);
+        // §11: ограничиваем пул (K writer-воркеров + headroom для EF/миграций) против connection-exhaustion.
+        dataSourceBuilder.ConnectionStringBuilder.MaxPoolSize = options.MaxWriterConnections;
+        var dataSource = dataSourceBuilder.Build();
         services.AddSingleton(dataSource);
 
         services.AddDbContextFactory<TickDbContext>(o => o.UseNpgsql(dataSource));
