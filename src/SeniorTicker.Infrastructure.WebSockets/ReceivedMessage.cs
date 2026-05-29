@@ -25,6 +25,11 @@ public readonly struct ReceivedMessage : IDisposable
 
     public ReadOnlySpan<byte> Span => _rented is null ? default : _rented.AsSpan(0, _length);
 
+    /// <summary>
+    /// ОДНОРАЗОВЫЙ контракт: каждый Dispose возвращает буфер в пул. НЕ копировать значение struct и
+    /// не звать Dispose дважды — это double-return одного и того же массива (порча пула). Guard-флага
+    /// нет намеренно: readonly struct не может мутировать состояние.
+    /// </summary>
     public void Dispose()
     {
         if (_rented is not null)
