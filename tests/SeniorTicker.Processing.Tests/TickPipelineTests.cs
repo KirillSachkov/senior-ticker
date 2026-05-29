@@ -113,4 +113,35 @@ public class TickPipelineTests
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             new TickPipeline(new PipelineOptions { ShardCount = 0 }, sink, metrics, time));
     }
+
+    [Fact]
+    public async Task High_parallel_producer_load_no_lost_or_duplicate_writes()
+    {
+        // Много продюсеров параллельно шлют пересекающиеся ключи; роутинг по символу
+        // гарантирует, что дубликаты сходятся в один шард → дедуп корректен без локов.
+        var sink = new InMemoryTickSink();
+        var metrics = new CountingMetricsSink();
+        var time = new FakeTimeProvider();
+        var pipeline = Make(sink, metrics, time, shards: 8, writers: 4);
+
+        var run = pipeline.RunAsync(CancellationToken.None);
+
+        const int producers = 16, perProducer = 500, uniqueKeys = 1000;
+        var tasks = Enumerable.Range(0, producers).Select(p => Task.Run(async () =>
+        {
+            for (var i = 0; i < perProducer; i++)
+            {
+                var id = (p * perProducer + i) % uniqueKeys; // намеренные пересечения ключей
+                await pipeline.Input.WriteAsync(TickFactory.New($"S{id % 20}", id));
+            }
+        })).ToArray();
+
+        await Task.WhenAll(tasks);
+        pipeline.Input.Complete();
+        await run.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // каждый (symbol=S{id%20}, sourceId=id) уникален; всего uniqueKeys уникальных ключей
+        Assert.Equal(uniqueKeys, sink.All.Count);
+        Assert.Equal(uniqueKeys, sink.All.Select(t => t.Key).Distinct().Count());
+    }
 }
