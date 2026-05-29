@@ -25,7 +25,7 @@ public sealed class WebSocketConnectorBase(
     public async Task RunAsync(CancellationToken ct)
     {
         var pipeline = ResiliencePipelineFactory.CreateReconnectPipeline(options, (ex, delay, attempt) =>
-            logger.LogWarning(ex, "{Name}: reconnect attempt {Attempt} in {Delay}", Name, attempt, delay));
+            logger.LogWarning(ex, "{Name}: reconnect attempt {Attempt} in {Delay}", Name, attempt + 1, delay));
         try
         {
             await pipeline.ExecuteAsync(async token => await ConnectAndConsumeAsync(token).ConfigureAwait(false), ct)
@@ -49,7 +49,7 @@ public sealed class WebSocketConnectorBase(
             using var msg = await receiver.ReceiveAsync(socket, ct).ConfigureAwait(false);
             if (msg.IsClosed)
             {
-                logger.LogWarning("{Name}: server closed connection — reconnecting", Name);
+                logger.LogInformation("{Name}: server closed connection — reconnecting", Name);
                 throw new WebSocketException(WebSocketError.ConnectionClosedPrematurely); // → Polly reconnect
             }
 
