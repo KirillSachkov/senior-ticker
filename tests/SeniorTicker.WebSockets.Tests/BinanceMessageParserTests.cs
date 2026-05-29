@@ -30,9 +30,23 @@ public class BinanceMessageParserTests
     [InlineData("{}")]
     [InlineData("""{"s":"BTCUSDT","p":"notanumber","q":"1","T":1,"a":1}""")]
     [InlineData("""{"s":null,"p":"1","q":"1","T":1,"a":1}""")]
+    // Defect 1: out-of-range T must return false (not throw)
+    [InlineData("""{"s":"BTCUSDT","p":"1","q":"1","T":9223372036854775807,"a":1}""")]
+    [InlineData("""{"s":"BTCUSDT","p":"1","q":"1","T":-9223372036854775808,"a":1}""")]
+    // wrong-type T and non-numeric q
+    [InlineData("""{"s":"BTCUSDT","p":"1","q":"1","T":"abc","a":1}""")]
+    [InlineData("""{"s":"BTCUSDT","p":"1","q":"x","T":1,"a":1}""")]
     public void Rejects_malformed_or_incomplete(string raw)
     {
         var parser = new BinanceMessageParser();
         Assert.False(parser.TryParse(Utf8(raw), Ingest, out _));
+    }
+
+    [Fact]
+    public void Rejects_duplicate_key_smuggling()
+    {
+        var parser = new BinanceMessageParser();
+        var json = """{"s":"BTCUSDT","s":"EVIL","p":"1","q":"1","T":1,"a":1}""";
+        Assert.False(parser.TryParse(System.Text.Encoding.UTF8.GetBytes(json), DateTimeOffset.UnixEpoch, out _));
     }
 }

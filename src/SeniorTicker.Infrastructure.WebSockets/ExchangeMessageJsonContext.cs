@@ -14,6 +14,7 @@ public sealed class BinanceTradeDto
 
 [JsonSourceGenerationOptions(
     PropertyNameCaseInsensitive = false,
-    AllowOutOfOrderMetadataProperties = false)]
+    AllowOutOfOrderMetadataProperties = false,
+    AllowDuplicateProperties = false)]
 [JsonSerializable(typeof(BinanceTradeDto))]
 public partial class ExchangeMessageJsonContext : JsonSerializerContext;
