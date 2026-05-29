@@ -208,7 +208,8 @@ Completion/cancellation завязаны на один токен → отсюд
 
 ### 6.1. `Tick` (Domain, `readonly record struct`)
 Поля: `Exchange` (enum/byte), `Symbol` (interned string или symbol-id), `Price` (`decimal`),
-`Volume` (`decimal`), `ExchangeTimestamp` (`DateTime` UTC), `SourceId` (long), `IngestTimestamp`.
+`Volume` (`decimal`), `ExchangeTimestamp` (`DateTimeOffset`, UTC — однозначный момент и корректное
+равенство для ключа), `SourceId` (long), `IngestTimestamp` (`DateTimeOffset`).
 
 ### 6.2. `TickKey` — гибридный составной ключ + фолбэк (критическое решение)
 `TickKey = (Exchange, Symbol, ExchangeTimestamp, SourceId)`, где `SourceId` = нативный
