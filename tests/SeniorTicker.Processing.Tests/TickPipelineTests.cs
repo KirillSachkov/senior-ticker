@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Time.Testing;
+using SeniorTicker.Application;
 using SeniorTicker.Domain;
 using Xunit;
 
@@ -6,13 +7,13 @@ namespace SeniorTicker.Processing.Tests;
 
 public class TickPipelineTests
 {
-    private static TickPipeline Make(InMemoryTickSink sink, CountingMetricsSink metrics,
-        FakeTimeProvider time, int shards = 1, int writers = 2)
+    private static TickPipeline Make(ITickSink sink, CountingMetricsSink metrics,
+        FakeTimeProvider time, int shards = 1, int writers = 2, int batchMaxSize = 100)
         => new(new PipelineOptions
         {
             ShardCount = shards,
             WriterCount = writers,
-            BatchMaxSize = 100,
+            BatchMaxSize = batchMaxSize,
             BatchMaxDelay = TimeSpan.FromMilliseconds(50),
             DedupWindow = TimeSpan.FromMinutes(1),
         }, sink, metrics, time);
@@ -79,6 +80,27 @@ public class TickPipelineTests
 
         Assert.Single(sink.All);                          // 1 уникальный, 9 отсеяно одним шардом
         Assert.Equal(9, Interlocked.Read(ref metrics.Deduplicated));
+    }
+
+    [Fact]
+    public async Task RunAsync_faults_when_sink_throws_and_does_not_hang()
+    {
+        var sink = new ThrowingTickSink();
+        var metrics = new CountingMetricsSink();
+        var time = new FakeTimeProvider();
+        // batchMaxSize:1 → каждый уникальный тик = свой батч. 50 батчей при BatchChannelCapacity=8
+        // и дохлых writer'ах: шард упирается в полный батч-канал и без фикса висит навсегда.
+        var pipeline = Make(sink, metrics, time, shards: 2, writers: 2, batchMaxSize: 1);
+
+        var run = pipeline.RunAsync(CancellationToken.None);
+        for (var i = 0; i < 50; i++)
+            await pipeline.Input.WriteAsync(TickFactory.New($"S{i % 3}", i));
+        pipeline.Input.Complete();
+
+        // Must FAULT with the sink's exception within a bounded time — not hang.
+        // If it hangs, WaitAsync throws TimeoutException and ThrowsAsync<InvalidOperationException> fails.
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => run.WaitAsync(TimeSpan.FromSeconds(5)));
     }
 
     [Fact]

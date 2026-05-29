@@ -69,29 +69,51 @@ public sealed class TickPipeline
 
     public async Task RunAsync(CancellationToken ct)
     {
+        // Внутренняя отмена, связанная с внешним ct: гасится либо внешней отменой, либо
+        // падением writer'а (C1). Чистый дренаж её НЕ трогает — все воркеры выходят сами.
+        using var abort = CancellationTokenSource.CreateLinkedTokenSource(ct);
+
         var shardTasks = new Task[_shards.Length];
         for (var i = 0; i < _shards.Length; i++)
         {
             var dedup = new SlidingWindowDeduplicator(_opt.DedupWindow, _time);
             var worker = new ShardWorker(dedup, _opt.BatchMaxSize, _opt.BatchMaxDelay, _time, _metrics);
-            shardTasks[i] = worker.RunAsync(_shards[i].Reader, _batches.Writer, ct);
+            shardTasks[i] = worker.RunAsync(_shards[i].Reader, _batches.Writer, abort.Token);
         }
 
-        var routerTask = RouteAsync(ct);
+        var routerTask = RouteAsync(abort.Token);
 
-        // когда все шарды доедены — завершаем общий батч-канал, чтобы writers вышли
-        var shardsCompletion = Task.Run(async () =>
-        {
-            await Task.WhenAll(shardTasks).ConfigureAwait(false);
-            _batches.Writer.TryComplete();
-        }, CancellationToken.None);
+        // когда все шарды доедены (или упали) — завершаем общий батч-канал в finally,
+        // чтобы writers вышли даже при фолте шарда (I1).
+        var shardsCompletion = CompleteBatchesWhenShardsDoneAsync(shardTasks);
 
         var writerTasks = new Task[_opt.WriterCount];
         for (var i = 0; i < writerTasks.Length; i++)
-            writerTasks[i] = WriteLoopAsync(ct);
+            writerTasks[i] = WriteLoopAsync(abort.Token, abort);
 
-        await Task.WhenAll(routerTask, shardsCompletion).ConfigureAwait(false);
-        await Task.WhenAll(writerTasks).ConfigureAwait(false);
+        var all = new List<Task>(2 + writerTasks.Length) { routerTask, shardsCompletion };
+        all.AddRange(writerTasks);
+        try
+        {
+            await Task.WhenAll(all).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Поверх отмены приоритетно поднимаем осмысленную ошибку (напр. фолт sink'а),
+            // сохраняя её стек, а не OperationCanceledException-следствие.
+            var fault = all.Where(t => t.IsFaulted)
+                           .SelectMany(t => t.Exception!.InnerExceptions)
+                           .FirstOrDefault(e => e is not OperationCanceledException);
+            if (fault is not null)
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(fault).Throw();
+            throw;
+        }
+    }
+
+    private async Task CompleteBatchesWhenShardsDoneAsync(Task[] shardTasks)
+    {
+        try { await Task.WhenAll(shardTasks).ConfigureAwait(false); }
+        finally { _batches.Writer.TryComplete(); }
     }
 
     private async Task RouteAsync(CancellationToken ct)
@@ -113,12 +135,20 @@ public sealed class TickPipeline
         }
     }
 
-    private async Task WriteLoopAsync(CancellationToken ct)
+    private async Task WriteLoopAsync(CancellationToken ct, CancellationTokenSource abort)
     {
-        await foreach (var batch in _batches.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+        try
         {
-            await _sink.WriteBatchAsync(batch, ct).ConfigureAwait(false);
-            _metrics.OnWritten(batch.Length);
+            await foreach (var batch in _batches.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+            {
+                await _sink.WriteBatchAsync(batch, ct).ConfigureAwait(false);
+                _metrics.OnWritten(batch.Length);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            abort.Cancel(); // разблокируем шарды, припаркованные на WriteAsync(_batches)
+            throw;
         }
     }
 }

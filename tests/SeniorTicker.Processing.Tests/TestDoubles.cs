@@ -21,6 +21,13 @@ public sealed class InMemoryTickSink : ITickSink
     public IReadOnlyCollection<Tick> All => _all.ToArray();
 }
 
+/// <summary>Всегда падает при записи батча — для проверки fail-fast вместо дедлока.</summary>
+public sealed class ThrowingTickSink : ITickSink
+{
+    public Task WriteBatchAsync(ReadOnlyMemory<Tick> batch, CancellationToken ct)
+        => throw new InvalidOperationException("sink failure");
+}
+
 public sealed class CountingMetricsSink : IMetricsSink
 {
     public long Received, Deduplicated, Written, Dropped;
