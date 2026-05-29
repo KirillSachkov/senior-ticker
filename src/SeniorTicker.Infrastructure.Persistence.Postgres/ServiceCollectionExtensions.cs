@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
+using SeniorTicker.Application;
 
 namespace SeniorTicker.Infrastructure.Persistence.Postgres;
 
@@ -21,7 +22,7 @@ public static class ServiceCollectionExtensions
         services.AddDbContextFactory<TickDbContext>(o => o.UseNpgsql(dataSource));
         services.AddSingleton(options);
         services.AddSingleton<DatabaseInitializer>();
-        // services.AddSingleton<ITickSink, CopyTickSink>(); // restored in Task 4 (CopyTickSink not created yet)
+        services.AddSingleton<ITickSink, CopyTickSink>();
         return services;
     }
 }
