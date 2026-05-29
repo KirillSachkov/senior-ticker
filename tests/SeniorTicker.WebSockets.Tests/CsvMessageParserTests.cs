@@ -44,4 +44,14 @@ public class CsvMessageParserTests
         // 9223372036854775807 = long.MaxValue — fits long but way outside valid ms range
         Assert.False(parser.TryParse(Utf8("ETHUSD,3000.25,1.5,9223372036854775807,1"), Ingest, out _));
     }
+
+    [Theory]
+    [InlineData("ETHUSD,3000.25,1.5,1700000000000XYZ,777")] // мусорный хвост в epochMs
+    [InlineData("ETHUSD,3000.25,1.5,1700000000000,777junk")] // мусорный хвост в id
+    public void Rejects_numeric_field_with_trailing_garbage(string raw)
+    {
+        // SEC-2: Utf8Parser парсит ПРЕФИКС; без проверки consumed == длины поля мусорный хвост принимался.
+        var parser = new CsvMessageParser();
+        Assert.False(parser.TryParse(Utf8(raw), Ingest, out _));
+    }
 }

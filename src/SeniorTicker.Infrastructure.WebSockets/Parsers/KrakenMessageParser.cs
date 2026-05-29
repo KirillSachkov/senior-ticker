@@ -73,6 +73,13 @@ public sealed class KrakenMessageParser : IMessageParser
         {
             return false;
         }
+        catch (InvalidOperationException)
+        {
+            // Utf8JsonReader.GetString() бросает InvalidOperationException на невалидном UTF-8 внутри
+            // JSON-строки (TokenType=String проходит лениво, транскодинг в UTF-16 падает). Это НЕ подтип
+            // JsonException → без этого catch исключение вылетело бы из TryParse и уронило receive-loop.
+            return false;
+        }
     }
 
     private static bool ReadDecimalString(ref Utf8JsonReader reader, out decimal value)

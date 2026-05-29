@@ -23,8 +23,10 @@ public sealed class CsvMessageParser : IMessageParser
 
         if (!TryParseDecimal(text[fields[1]], out var price)) return false;
         if (!TryParseDecimal(text[fields[2]], out var volume)) return false;
-        if (!Utf8Parser.TryParse(text[fields[3]], out long epochMs, out _)) return false;
-        if (!Utf8Parser.TryParse(text[fields[4]], out long id, out _)) return false;
+        // Utf8Parser парсит ПРЕФИКС: без проверки consumed == длины поля "1700000000000XYZ" приняло бы 1700000000000.
+        // Требуем полного потребления — симметрично строгости decimal-полей и Kraken (отвергает хвостовые элементы).
+        if (!TryParseFullInt64(text[fields[3]], out long epochMs)) return false;
+        if (!TryParseFullInt64(text[fields[4]], out long id)) return false;
 
         // Guard: epochMs must be in valid DateTimeOffset range before calling FromUnixTimeMilliseconds
         if (epochMs < UnixTime.MinMs || epochMs > UnixTime.MaxMs) return false;
@@ -47,4 +49,7 @@ public sealed class CsvMessageParser : IMessageParser
 
     private static bool TryParseDecimal(ReadOnlySpan<byte> utf8, out decimal value)
         => decimal.TryParse(utf8, NumberStyles.Number, CultureInfo.InvariantCulture, out value);
+
+    private static bool TryParseFullInt64(ReadOnlySpan<byte> utf8, out long value)
+        => Utf8Parser.TryParse(utf8, out value, out var consumed) && consumed == utf8.Length;
 }

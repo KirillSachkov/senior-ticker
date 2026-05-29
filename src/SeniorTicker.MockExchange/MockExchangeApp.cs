@@ -12,7 +12,17 @@ public static class MockExchangeApp
         app.Map("/binance", (HttpContext ctx) => Stream(ctx, MockTickGenerator.Binance, "BTCUSDT"));
         app.Map("/kraken",  (HttpContext ctx) => Stream(ctx, MockTickGenerator.Kraken,  "BTC/USD"));
         app.Map("/csv",     (HttpContext ctx) => Stream(ctx, MockTickGenerator.Csv,     "ETHUSD"));
+        app.Map("/silent",  Silent); // принимает сокет и молчит — для проверки idle-таймаута коннектора (WS-1)
         return app;
+    }
+
+    // Завершает WS-хендшейк, но никогда не шлёт data-кадры (имитация slowloris / half-open peer).
+    private static async Task Silent(HttpContext ctx)
+    {
+        if (!ctx.WebSockets.IsWebSocketRequest) { ctx.Response.StatusCode = 400; return; }
+        using var socket = await ctx.WebSockets.AcceptWebSocketAsync();
+        try { await Task.Delay(Timeout.Infinite, ctx.RequestAborted); }
+        catch (OperationCanceledException) { /* клиент отключился / idle-reconnect */ }
     }
 
     private static async Task Stream(HttpContext ctx, Func<string, long, long, string> fmt, string symbol)

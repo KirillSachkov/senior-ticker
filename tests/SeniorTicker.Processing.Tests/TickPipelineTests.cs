@@ -104,6 +104,47 @@ public class TickPipelineTests
     }
 
     [Fact]
+    public async Task Drains_all_ticks_without_loss_under_backpressure()
+    {
+        // TEST-3 / проблема №5: крошечные ёмкости + закрытый sink → ВСЕ каналы насыщаются и продюсер
+        // паркуется на backpressure. После Open() + Complete() двухфазный дренаж обязан доставить всё.
+        var sink = new GatedTickSink();
+        var metrics = new CountingMetricsSink();
+        var time = new FakeTimeProvider();
+        var pipeline = new TickPipeline(new PipelineOptions
+        {
+            ShardCount = 1,
+            WriterCount = 1,
+            IngestCapacity = 2,
+            ShardCapacity = 2,
+            BatchChannelCapacity = 1,
+            BatchMaxSize = 1,                                  // каждый тик = свой батч (без таймера)
+            BatchMaxDelay = TimeSpan.FromMilliseconds(50),
+            DedupWindow = TimeSpan.FromMinutes(1),
+        }, sink, metrics, time);
+
+        var run = pipeline.RunAsync(CancellationToken.None);
+
+        const int n = 20;
+        var produce = Task.Run(async () =>
+        {
+            for (var i = 0; i < n; i++)
+                await pipeline.Input.WriteAsync(TickFactory.New("BTC", i)); // уникальные sourceId
+            pipeline.Input.Complete();
+        });
+
+        await Task.Delay(100);                                 // дать конвейеру насытиться
+        Assert.False(produce.IsCompleted, "ожидался backpressure: продюсер должен застрять на полном канале");
+
+        sink.Open();                                           // открываем — бэклог дренажируется
+        await produce;
+        await run.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(n, sink.All.Count);                       // ноль потерь при дренаже под насыщением
+        Assert.Equal(n, sink.All.Select(t => t.Key).Distinct().Count());
+    }
+
+    [Fact]
     public async Task Constructor_rejects_invalid_options()
     {
         var sink = new InMemoryTickSink();

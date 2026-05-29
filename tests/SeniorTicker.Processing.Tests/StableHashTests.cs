@@ -12,6 +12,17 @@ public class StableHashTests
         Assert.NotEqual(StableHash.Fnv1a64("BTCUSDT"), StableHash.Fnv1a64("ETHUSDT"));
     }
 
+    [Fact]
+    public void Fnv1a64_matches_golden_vectors()
+    {
+        // ARCH-1: пиннит именно FNV-1a. Подмена тела на String.GetHashCode (рандомизирован per-process →
+        // ломает кросс-инстансный/кросс-рестартный шардинг, проблема №2/№3) оставила бы тест
+        // детерминизма зелёным, но эти golden-вектора — нет. Значения вычислены независимо.
+        Assert.Equal(14695981039346656037UL, StableHash.Fnv1a64(""));        // FNV offset basis (пустой вход)
+        Assert.Equal(4495733446125262380UL, StableHash.Fnv1a64("BTCUSDT"));
+        Assert.Equal(9177286476152214768UL, StableHash.Fnv1a64("ETHUSDT"));
+    }
+
     [Theory]
     [InlineData("BTCUSDT", 4)]
     [InlineData("ETHUSDT", 1)]
