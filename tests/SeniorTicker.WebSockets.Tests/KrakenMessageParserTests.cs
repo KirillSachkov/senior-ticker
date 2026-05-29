@@ -8,6 +8,7 @@ namespace SeniorTicker.WebSockets.Tests;
 public class KrakenMessageParserTests
 {
     private static ReadOnlySpan<byte> Utf8(string s) => Encoding.UTF8.GetBytes(s);
+    private static byte[] Bytes(string s) => Encoding.UTF8.GetBytes(s);
     private static readonly DateTimeOffset Ingest = DateTimeOffset.UnixEpoch;
 
     [Fact]
@@ -44,5 +45,22 @@ public class KrakenMessageParserTests
         var parser = new KrakenMessageParser();
         var raw = """[42,["50000.5","0.25","99999999999999999"],"trade","BTC/USD",1]""";
         Assert.False(parser.TryParse(Utf8(raw), Ingest, out _));
+    }
+
+    [Fact]
+    public void Rejects_invalid_utf8_without_throwing()
+    {
+        // Регресс SEC-1: Utf8JsonReader.GetString() на невалидных UTF-8 байтах внутри JSON-строки
+        // бросает InvalidOperationException (TokenType=String проходит лениво, транскодинг падает).
+        // Раньше он был вне catch-списка → вылетал из TryParse → ронял receive-loop → DoS под reconnect.
+        var parser = new KrakenMessageParser();
+
+        // битые байты (0xFF 0xFE) в строке символа: [42,["1","2","3"],"trade","<bad>",1]
+        byte[] badSymbol = [.. Bytes("""[42,["1","2","3"],"trade","""), 0x22, 0xFF, 0xFE, 0x22, .. Bytes(",1]")];
+        // и в decimal-строке вложенного массива: [42,["<bad>","2","3"],"trade","BTC/USD",1]
+        byte[] badDecimal = [.. Bytes("[42,["), 0x22, 0xFF, 0xFE, 0x22, .. Bytes(""","2","3"],"trade","BTC/USD",1]""")];
+
+        Assert.False(parser.TryParse(badSymbol, Ingest, out _));   // не бросает, возвращает false
+        Assert.False(parser.TryParse(badDecimal, Ingest, out _));
     }
 }
