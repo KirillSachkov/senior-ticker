@@ -28,6 +28,22 @@ public sealed class ThrowingTickSink : ITickSink
         => throw new InvalidOperationException("sink failure");
 }
 
+/// <summary>Не отдаёт записи, пока не вызван Open() — позволяет насытить каналы и проверить дренаж под backpressure.</summary>
+public sealed class GatedTickSink : ITickSink
+{
+    private readonly TaskCompletionSource _open = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly ConcurrentQueue<Tick> _all = new();
+    public void Open() => _open.TrySetResult();
+    public IReadOnlyCollection<Tick> All => _all.ToArray();
+
+    public async Task WriteBatchAsync(ReadOnlyMemory<Tick> batch, CancellationToken ct)
+    {
+        await _open.Task.WaitAsync(ct).ConfigureAwait(false);
+        foreach (var t in batch.Span)
+            _all.Enqueue(t);
+    }
+}
+
 public sealed class CountingMetricsSink : IMetricsSink
 {
     public long Received, Deduplicated, Written, Dropped;
