@@ -26,6 +26,28 @@ public class TickValidatorTests
     [Fact] public void Rejects_negative_volume() => Assert.False(TickValidator.IsValid(Make(volume: -1m), Time()));
     [Fact] public void Rejects_empty_symbol() => Assert.False(TickValidator.IsValid(Make(symbol: ""), Time()));
 
+    // SEC-3: символ не должен отравлять окно дедупа/шард-роутинг — ограничиваем длину и charset.
+    [Fact]
+    public void Rejects_overlong_symbol()
+        => Assert.False(TickValidator.IsValid(Make(symbol: new string('A', TickValidator.MaxSymbolLength + 1)), Time()));
+
+    [Theory]
+    [InlineData("BTC USD")]   // пробел
+    [InlineData("BTC;DROP")]  // спецсимвол
+    [InlineData("BTC\t")] // управляющий (таб)
+    [InlineData("бтс")]       // не-ASCII
+    public void Rejects_symbol_with_invalid_chars(string symbol)
+        => Assert.False(TickValidator.IsValid(Make(symbol: symbol), Time()));
+
+    [Theory]
+    [InlineData("BTCUSDT")]
+    [InlineData("BTC/USD")]
+    [InlineData("XBT-USD")]
+    [InlineData("BTC_USD")]
+    [InlineData("BTC.D")]
+    public void Accepts_real_world_symbols(string symbol)
+        => Assert.True(TickValidator.IsValid(Make(symbol: symbol), Time()));
+
     [Fact]
     public void Rejects_timestamp_far_in_the_past()
         => Assert.False(TickValidator.IsValid(Make(ts: Now - TimeSpan.FromDays(8)), Time()));
