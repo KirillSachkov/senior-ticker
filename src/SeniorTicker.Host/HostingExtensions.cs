@@ -24,8 +24,14 @@ public static class HostingExtensions
 {
     public static HostApplicationBuilder AddSeniorTicker(this HostApplicationBuilder builder)
     {
-        // dev-секреты: appsettings хранит имена, ConnectionStrings:Postgres — в user-secrets/env (§11).
-        builder.Configuration.AddUserSecrets(Assembly.GetExecutingAssembly(), optional: true);
+        // dev-секреты (§11): appsettings хранит имена; ConnectionStrings:Postgres — в env (prod) / user-secrets (dev).
+        // User-secrets ТОЛЬКО в Development и ПЕРЕД env (re-add env), иначе устаревший secrets.json молча перебил
+        // бы ConnectionStrings__Postgres из env (Host.CreateApplicationBuilder сам user-secrets не добавляет).
+        if (builder.Environment.IsDevelopment())
+        {
+            builder.Configuration.AddUserSecrets(Assembly.GetExecutingAssembly(), optional: true);
+            builder.Configuration.AddEnvironmentVariables();
+        }
 
         // Serilog: уровни из конфига, консольный sink в коде (без двойного sink через config-discovery).
         builder.Services.AddSerilog((sp, lc) => lc

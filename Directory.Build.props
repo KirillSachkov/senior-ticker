@@ -6,5 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- Supply-chain (§11): фиксируем дерево зависимостей в packages.lock.json (коммитятся).
+         Воспроизводимость + защита от dependency-confusion. В CI восстанавливаем в locked-mode. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
 </Project>
