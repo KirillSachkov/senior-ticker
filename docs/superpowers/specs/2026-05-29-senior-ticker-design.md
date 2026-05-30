@@ -399,11 +399,14 @@ NuGet source mapping, `dotnet list package --vulnerable`/Dependabot в CI.
 ## 14. Конфигурация
 
 `appsettings.json` + env. Коннекторы — типизированный список (`Exchanges[]`: `Name`, `Url` (wss),
-`Format`, `Enabled`, `Symbols[]`), регистрируются **только enabled** (фикс №9: debug-коннектор есть
-только в Development-профиле). Тюнинг-ручки: `Pipeline:ShardCount` (P), `Pipeline:WriterCount` (K),
-`Pipeline:IngestChannelCapacity`, `Pipeline:BatchChannelCapacity`, `Pipeline:BatchMaxSize` (N),
-`Pipeline:BatchMaxDelayMs` (T), `Shutdown:DrainTimeoutSeconds` (+ `HostOptions.ShutdownTimeout` >
-этого). Все секреты — через env/user-secrets с `ValidateOnStart`.
+`Format`, `Enabled`), регистрируются **только enabled** (фикс №9: debug-коннектор есть
+только в Development-профиле). `Symbols[]` — growth-path (per-symbol-мультиплексирование §10), в
+single-process-эталоне намеренно не вводится (анти-dead-config; см. План 4 §4). Тюнинг-ручки:
+`Pipeline:ShardCount` (P), `Pipeline:WriterCount` (K), `Pipeline:IngestCapacity`,
+`Pipeline:ShardCapacity`, `Pipeline:BatchChannelCapacity`, `Pipeline:BatchMaxSize` (N),
+`Pipeline:BatchMaxDelayMs` (T), `Pipeline:DedupWindowSeconds`, `Shutdown:DrainTimeoutSeconds`
+(+ `HostOptions.ShutdownTimeout` > этого), `Postgres:MaxWriterConnections` (≥ K + headroom). Все
+секреты — через env/user-secrets с `ValidateOnStart`.
 
 ---
 

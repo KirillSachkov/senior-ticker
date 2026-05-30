@@ -72,7 +72,6 @@ public class ConnectorReceivesAndNormalizesTests
         var options = new WebSocketConnectorOptions
         {
             Name = "binance",
-            Exchange = Exchange.Binance,
             Url = new Uri($"{server.BaseWsUrl}/binance"),
         };
         var connector = new WebSocketConnectorBase(

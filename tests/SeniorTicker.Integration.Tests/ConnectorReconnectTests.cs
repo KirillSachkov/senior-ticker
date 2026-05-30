@@ -1,6 +1,5 @@
 using System.Net.WebSockets;
 using Microsoft.Extensions.Logging.Abstractions;
-using SeniorTicker.Domain;
 using SeniorTicker.Infrastructure.WebSockets;
 using SeniorTicker.Infrastructure.WebSockets.Parsers;
 
@@ -18,7 +17,6 @@ public class ConnectorReconnectTests
         var options = new WebSocketConnectorOptions
         {
             Name = "binance",
-            Exchange = Exchange.Binance,
             Url = new Uri($"{server.BaseWsUrl}/binance?dropAfter=3"),
             ReconnectBaseDelay = TimeSpan.FromMilliseconds(50),
             ReconnectMaxDelay = TimeSpan.FromMilliseconds(200),
@@ -58,7 +56,6 @@ public class ConnectorReconnectTests
         var options = new WebSocketConnectorOptions
         {
             Name = "silent",
-            Exchange = Exchange.Binance,
             Url = new Uri($"{server.BaseWsUrl}/silent"),
             ReceiveIdleTimeout = TimeSpan.FromMilliseconds(300), // peer молчит → таймаут → reconnect
             ReconnectBaseDelay = TimeSpan.FromMilliseconds(50),

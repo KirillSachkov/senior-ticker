@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- dev-секреты: appsettings хранит имена, ConnectionStrings:Postgres — в user-secrets/env (§11) -->
+    <UserSecretsId>senior-ticker-host</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SeniorTicker.Application\SeniorTicker.Application.csproj" />
+    <ProjectReference Include="..\SeniorTicker.Domain\SeniorTicker.Domain.csproj" />
+    <ProjectReference Include="..\SeniorTicker.Processing\SeniorTicker.Processing.csproj" />
+    <ProjectReference Include="..\SeniorTicker.Infrastructure.WebSockets\SeniorTicker.Infrastructure.WebSockets.csproj" />
+    <ProjectReference Include="..\SeniorTicker.Infrastructure.Persistence.Postgres\SeniorTicker.Infrastructure.Persistence.Postgres.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" />
+    <PackageReference Include="Serilog.Extensions.Hosting" />
+    <PackageReference Include="Serilog.Settings.Configuration" />
+    <PackageReference Include="Serilog.Sinks.Console" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="appsettings.Development.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

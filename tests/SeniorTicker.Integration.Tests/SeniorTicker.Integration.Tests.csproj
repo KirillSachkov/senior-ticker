@@ -13,11 +13,14 @@
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Npgsql" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\SeniorTicker.Infrastructure.WebSockets\SeniorTicker.Infrastructure.WebSockets.csproj" />
     <ProjectReference Include="..\..\src\SeniorTicker.MockExchange\SeniorTicker.MockExchange.csproj" />
+    <ProjectReference Include="..\..\src\SeniorTicker.Host\SeniorTicker.Host.csproj" />
   </ItemGroup>
 
   <ItemGroup>
