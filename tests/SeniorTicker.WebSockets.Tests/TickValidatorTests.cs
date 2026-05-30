@@ -26,6 +26,20 @@ public class TickValidatorTests
     [Fact] public void Rejects_negative_volume() => Assert.False(TickValidator.IsValid(Make(volume: -1m), Time()));
     [Fact] public void Rejects_empty_symbol() => Assert.False(TickValidator.IsValid(Make(symbol: ""), Time()));
 
+    // SEC: значение с 21+ цифрой целой части прошло бы parser и нижний гейт, но уронило бы COPY в
+    // numeric(38,18) (numeric field overflow) → фолт конвейера → краш хоста одним кадром (remote DoS).
+    [Fact]
+    public void Rejects_price_above_column_range()
+        => Assert.False(TickValidator.IsValid(Make(price: 100_000_000_000_000_000_000m), Time())); // 10^20
+
+    [Fact]
+    public void Rejects_volume_above_column_range()
+        => Assert.False(TickValidator.IsValid(Make(volume: 100_000_000_000_000_000_000m), Time()));
+
+    [Fact]
+    public void Accepts_large_but_in_range_value()
+        => Assert.True(TickValidator.IsValid(Make(price: TickValidator.MaxValue, volume: TickValidator.MaxValue), Time()));
+
     // SEC-3: символ не должен отравлять окно дедупа/шард-роутинг — ограничиваем длину и charset.
     [Fact]
     public void Rejects_overlong_symbol()

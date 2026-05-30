@@ -253,8 +253,13 @@ EF Core миграции применяются на старте отдельн
 | **binary COPY** | **~100×+** | бинарный wire-формат, 1 round-trip/батч, ноль per-row parse |
 
 ### 7.2. Батч и граница LOH
-Батч **~1000–4000 тиков**, массив **< 85 000 байт** (граница LOH; больше → gen2/LOH-сборки). Флаш
-**N-или-T** (напр. 1000 **или** 100 мс) — низкая скорость всё равно флашится вовремя. `N`,`T` — конфиг.
+Связывающее ограничение — **массив < 85 000 байт** (граница LOH; больше → gen2/LOH-сборки). Замерено
+(`Unsafe.SizeOf<Tick>()`): **sizeof(Tick) = 88 байт** → `Tick[1000]` = 88 000 байт **уже за LOH**.
+Поэтому дефолт `N = 900` (900×88 = 79 200 < 85 000; максимум под LOH ≈ 965). Флаш **N-или-T**
+(900 **или** 100 мс) — низкая скорость всё равно флашится вовремя. `N`,`T` — конфиг; CI-гейт проверяет
+`N × sizeof(Tick) < 85 000`. Для батчей крупнее (рост §8) — `ArrayPool<Tick>` с возвратом после COPY
+(growth-path, YAGNI на 100/с). Урок «1000–4000» из общей эвристики уступил **замеру** для конкретного
+размера `Tick` — нагрузочный тест против реальности, а не прикидка в уме.
 
 ### 7.3. Дисциплина аллокаций
 `Tick` — `readonly record struct` (ноль per-item heap; канал хранит инлайн, без боксинга);
@@ -330,8 +335,10 @@ BLOCK связывает liveness приёма с liveness Postgres: долги�
 - **Split-brain:** при rebalance/network-partition два инстанса пишут один символ → UNIQUE-констрейнт
   обязателен как backstop + fencing-lease (TTL/epoch).
 - **Чёткий non-goal для теста:** брокер/Redis-дедуп/координатор — over-engineering на 100/с и SPOF,
-  который ревьюер отметит. Строим только single-process, но **partition-ready** (точный ключ,
-  `IDeduplicator`-seam, символы из конфига). Мульти-инстанс — документированный путь.
+  который ревьюер отметит. Строим только single-process, но **partition-ready** (точный ключ содержит
+  `Symbol` → кандидаты-дубли всегда co-shard, дедуп остаётся локальным; `IDeduplicator`-seam).
+  Мульти-инстанс — документированный путь. (`Symbols[]` в конфиг намеренно не вводим — анти-dead-config,
+  см. План 4 §4.)
 
 ---
 
@@ -349,9 +356,10 @@ BLOCK связывает liveness приёма с liveness Postgres: долги�
 **Кольцо 2 — нормализационный гейт (на коннектор):**
 - STJ: `AllowDuplicateProperties=false` (**новое в .NET 10, дефолт `true` — выставить явно!**) против
   parser-differential smuggling (`{"price":1,…,"price":99999}`); `MaxDepth=32`; case-sensitive.
-- Валидация значений до канала: reject NaN/Infinity/negative/zero-price/negative-volume; bound numeric
-  ranges (конфиг); clamp timestamp в окно `[now-7d, now+1min]` (абсурдный timestamp **отравляет окно
-  дедупа** и партиции); `decimal` для цены.
+- Валидация значений до канала: reject zero/negative-price, negative-volume и **over-range price/volume**
+  (верхняя граница ≥ 10^18 — иначе overflow колонки `numeric(38,18)` при COPY → фолт → краш хоста одним
+  кадром); **reject (skip+count)** тик с timestamp вне окна `[now-7d, now+1min]` (абсурдный timestamp
+  **отравляет окно дедупа** и BRIN-индекс по времени); `decimal` для цены.
 - Malformed-фрейм = **skip + count + sampled-log**, никогда throw из receive-loop (один битый фрейм
   не должен ронять коннектор — тривиальный DoS). Порог → Warning + circuit (Polly).
 

@@ -13,7 +13,7 @@ public sealed class PipelineConfig
     public int IngestCapacity { get; init; } = 1000;
     public int ShardCapacity { get; init; } = 1000;
     public int BatchChannelCapacity { get; init; } = 8;
-    public int BatchMaxSize { get; init; } = 1000;
+    public int BatchMaxSize { get; init; } = 900;   // §7.2: 900×sizeof(Tick=88)=79.2KB держит батч-массив < LOH 85KB
     public int BatchMaxDelayMs { get; init; } = 100;
     public int DedupWindowSeconds { get; init; } = 60;
 
