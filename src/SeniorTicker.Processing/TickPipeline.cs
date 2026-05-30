@@ -67,6 +67,12 @@ public sealed class TickPipeline
     /// <summary>Точка входа для продюсеров (коннекторов). Backpressure #1.</summary>
     public ChannelWriter<Tick> Input => _ingest.Writer;
 
+    /// <summary>Глубина входного канала (для метрик §12: полный → лимитер дедуп/батч).</summary>
+    public int IngestDepth => _ingest.Reader.Count;
+
+    /// <summary>Глубина батч-канала (для метрик §12: полный → лимитер БД).</summary>
+    public int BatchDepth => _batches.Reader.Count;
+
     public async Task RunAsync(CancellationToken ct)
     {
         // Внутренняя отмена, связанная с внешним ct: гасится либо внешней отменой, либо
