@@ -132,6 +132,11 @@ button.primary {
   box-shadow: 0 0 0 4px rgb(94 224 132 / 14%);
 }
 
+.status-dot.is-busy {
+  background: var(--yellow);
+  box-shadow: 0 0 0 4px rgb(255 216 74 / 14%);
+}
+
 .muted {
   color: var(--muted);
 }
@@ -216,7 +221,7 @@ input[type="range"] {
 
 .modes-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(520px, 100%), 1fr));
   gap: 16px;
   margin-top: 16px;
 }

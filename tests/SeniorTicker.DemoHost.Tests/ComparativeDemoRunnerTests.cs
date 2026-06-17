@@ -1,3 +1,4 @@
+using Npgsql;
 using SeniorTicker.DemoHost.Demo;
 
 namespace SeniorTicker.DemoHost.Tests;
@@ -6,7 +7,7 @@ namespace SeniorTicker.DemoHost.Tests;
 public class ComparativeDemoRunnerTests(DemoPostgresFixture fx)
 {
     [Fact]
-    public async Task Starts_all_three_modes_and_writes_to_real_postgres()
+    public async Task Starts_both_modes_and_writes_to_real_postgres()
     {
         var db = new DemoDatabase(fx.DataSource);
         var runner = new ComparativeDemoRunner(db, fx.DataSource);
@@ -26,7 +27,8 @@ public class ComparativeDemoRunnerTests(DemoPostgresFixture fx)
         await runner.StopAsync(CancellationToken.None);
 
         var snapshot = runner.Snapshot();
-        Assert.Equal(3, snapshot.Modes.Length);
+        Assert.Equal(DemoRunStates.Stopped, snapshot.State);
+        Assert.Equal(2, snapshot.Modes.Length);
         Assert.All(snapshot.Modes, mode =>
         {
             Assert.True(mode.Accepted > 0);
@@ -56,10 +58,49 @@ public class ComparativeDemoRunnerTests(DemoPostgresFixture fx)
         await runner.StopAsync(CancellationToken.None);
 
         var snapshot = runner.Snapshot();
+        Assert.Equal(DemoRunStates.Stopped, snapshot.State);
         Assert.All(snapshot.Modes, mode =>
         {
             var duplicateRatio = (double)mode.Deduplicated / mode.Accepted;
             Assert.InRange(duplicateRatio, 0.75, 0.98);
         });
+    }
+
+    [Fact]
+    public async Task Reset_clears_database_and_visible_counters()
+    {
+        var db = new DemoDatabase(fx.DataSource);
+        var runner = new ComparativeDemoRunner(db, fx.DataSource);
+
+        await runner.ResetAsync(CancellationToken.None);
+        await runner.StartAsync(new DemoConfig
+        {
+            RatePerSecond = 500,
+            HotSymbolPercent = 100,
+            DuplicatePercent = 10,
+            ShardCount = 4,
+            WriterCount = 2,
+            BatchMaxSize = 50,
+        }, CancellationToken.None);
+
+        await Task.Delay(800);
+        await runner.ResetAsync(CancellationToken.None);
+
+        var snapshot = runner.Snapshot();
+        Assert.False(snapshot.Running);
+        Assert.Equal(DemoRunStates.Stopped, snapshot.State);
+        Assert.All(snapshot.Modes, mode =>
+        {
+            Assert.Equal(0, mode.Accepted);
+            Assert.Equal(0, mode.Received);
+            Assert.Equal(0, mode.Deduplicated);
+            Assert.Equal(0, mode.Written);
+            Assert.Equal(0, mode.DbRows);
+            Assert.All(mode.ShardAccepted, value => Assert.Equal(0, value));
+        });
+
+        await using var conn = await fx.DataSource.OpenConnectionAsync();
+        await using var count = new NpgsqlCommand("SELECT count(*) FROM demo_ticks", conn);
+        Assert.Equal(0L, (long)(await count.ExecuteScalarAsync())!);
     }
 }

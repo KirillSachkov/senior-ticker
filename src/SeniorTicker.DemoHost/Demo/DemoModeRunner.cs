@@ -11,7 +11,6 @@ public sealed class DemoModeRunner
     private readonly DemoMode _mode;
     private readonly NpgsqlDataSource _dataSource;
     private readonly IShardPartitioner _partitioner;
-    private readonly bool _useDataflow;
     private readonly object _gate = new();
 
     private DemoConfig _config = new();
@@ -19,22 +18,33 @@ public sealed class DemoModeRunner
     private DemoPostgresSink? _sink;
     private TickPipeline? _channels;
     private Task? _channelsTask;
-    private DataflowTickPipeline? _dataflow;
     private CancellationTokenSource? _producerCts;
     private Task? _producerTask;
     private long _accepted;
     private long _lastUniqueKey = -1;
     private long[] _shardAccepted = [];
 
-    public DemoModeRunner(DemoMode mode, NpgsqlDataSource dataSource, IShardPartitioner partitioner, bool useDataflow)
+    public DemoModeRunner(DemoMode mode, NpgsqlDataSource dataSource, IShardPartitioner partitioner)
     {
         _mode = mode;
         _dataSource = dataSource;
         _partitioner = partitioner;
-        _useDataflow = useDataflow;
     }
 
     public bool Running => _producerTask is { IsCompleted: false };
+
+    public void ResetStats(DemoConfig config)
+    {
+        lock (_gate)
+        {
+            _config = config.Normalize();
+            _metrics = new DemoMetricsSink();
+            _sink = null;
+            _accepted = 0;
+            _lastUniqueKey = -1;
+            _shardAccepted = new long[_config.ShardCount];
+        }
+    }
 
     public Task StartAsync(DemoConfig config)
     {
@@ -60,17 +70,8 @@ public sealed class DemoModeRunner
                 DedupWindow = TimeSpan.FromMinutes(5),
             };
 
-            if (_useDataflow)
-            {
-                _dataflow = new DataflowTickPipeline(options, _sink, _metrics, TimeProvider.System, _partitioner);
-                _channels = null;
-            }
-            else
-            {
-                _channels = new TickPipeline(options, _sink, _metrics, TimeProvider.System, _partitioner);
-                _dataflow = null;
-                _channelsTask = _channels.RunAsync(CancellationToken.None);
-            }
+            _channels = new TickPipeline(options, _sink, _metrics, TimeProvider.System, _partitioner);
+            _channelsTask = _channels.RunAsync(CancellationToken.None);
 
             _producerTask = ProduceAsync(_producerCts.Token);
         }
@@ -83,7 +84,6 @@ public sealed class DemoModeRunner
         CancellationTokenSource? cts;
         Task? producer;
         TickPipeline? channels;
-        DataflowTickPipeline? dataflow;
         Task? channelsTask;
 
         lock (_gate)
@@ -91,13 +91,11 @@ public sealed class DemoModeRunner
             cts = _producerCts;
             producer = _producerTask;
             channels = _channels;
-            dataflow = _dataflow;
             channelsTask = _channelsTask;
             _producerCts = null;
             _producerTask = null;
             _channels = null;
             _channelsTask = null;
-            _dataflow = null;
         }
 
         if (cts is not null)
@@ -110,13 +108,9 @@ public sealed class DemoModeRunner
         }
 
         channels?.Input.TryComplete();
-        dataflow?.Complete();
 
         if (channelsTask is not null)
             await channelsTask.WaitAsync(TimeSpan.FromSeconds(10));
-
-        if (dataflow is not null)
-            await dataflow.Completion.WaitAsync(TimeSpan.FromSeconds(10));
 
         cts?.Dispose();
     }
@@ -125,7 +119,6 @@ public sealed class DemoModeRunner
     {
         var totals = _metrics.Snapshot();
         var channels = _channels;
-        var dataflow = _dataflow;
         var shardAccepted = _shardAccepted.Select((_, i) => Interlocked.Read(ref _shardAccepted[i])).ToArray();
 
         return new ModeSnapshot(
@@ -137,9 +130,9 @@ public sealed class DemoModeRunner
             totals.Deduplicated,
             totals.Written,
             _sink?.Rows ?? 0,
-            channels?.IngestDepth ?? dataflow?.IngestDepth ?? 0,
-            channels?.BatchDepth ?? dataflow?.BatchDepth ?? 0,
-            channels?.ShardDepths ?? dataflow?.ShardDepths ?? [],
+            channels?.IngestDepth ?? 0,
+            channels?.BatchDepth ?? 0,
+            channels?.ShardDepths ?? [],
             shardAccepted);
     }
 
@@ -159,8 +152,6 @@ public sealed class DemoModeRunner
 
                 if (_channels is not null)
                     await _channels.Input.WriteAsync(tick, ct);
-                else if (_dataflow is not null)
-                    await _dataflow.SendAsync(tick, ct);
 
                 Interlocked.Increment(ref _accepted);
                 Interlocked.Increment(ref _shardAccepted[shard]);

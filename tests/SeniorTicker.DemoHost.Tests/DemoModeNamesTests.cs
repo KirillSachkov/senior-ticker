@@ -9,6 +9,5 @@ public class DemoModeNamesTests
     {
         Assert.Equal("Каналы: шардинг по символу", DemoMode.ChannelsSymbol.ToDisplayName());
         Assert.Equal("Каналы: шардинг по ключу тика", DemoMode.ChannelsDedupKey.ToDisplayName());
-        Assert.Equal("TPL Dataflow: шардинг по ключу тика", DemoMode.DataflowDedupKey.ToDisplayName());
     }
 }

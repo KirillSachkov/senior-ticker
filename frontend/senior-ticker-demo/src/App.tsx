@@ -27,10 +27,13 @@ type ModeSnapshot = {
 
 type DemoSnapshot = {
   running: boolean;
+  state: string;
   config: DemoConfig;
   timestamp: string;
   modes: ModeSnapshot[];
 };
+
+type BusyAction = "start" | "stop" | "reset";
 
 type ModeRates = {
   receivedPerSecond: number;
@@ -49,6 +52,7 @@ const defaultConfig: DemoConfig = {
 
 const emptySnapshot: DemoSnapshot = {
   running: false,
+  state: "stopped",
   config: defaultConfig,
   timestamp: new Date(0).toISOString(),
   modes: [],
@@ -59,8 +63,8 @@ const formatNumber = new Intl.NumberFormat("ru-RU");
 export default function App() {
   const [snapshot, setSnapshot] = useState<DemoSnapshot>(emptySnapshot);
   const [config, setConfig] = useState<DemoConfig>(defaultConfig);
-  const [status, setStatus] = useState("подключение");
-  const [busy, setBusy] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState("подключение");
+  const [busyAction, setBusyAction] = useState<BusyAction | null>(null);
   const [rates, setRates] = useState<Record<string, ModeRates>>({});
   const previous = useRef<DemoSnapshot | null>(null);
 
@@ -93,12 +97,12 @@ export default function App() {
         setConfig(data.config);
       })
       .catch(() => {
-        if (active) setStatus("api недоступен");
+        if (active) setConnectionStatus("api недоступен");
       });
 
     const events = new EventSource("/api/demo/events");
-    events.onopen = () => setStatus("подключено");
-    events.onerror = () => setStatus("переподключение");
+    events.onopen = () => setConnectionStatus("подключено");
+    events.onerror = () => setConnectionStatus("переподключение");
     events.onmessage = (event) => applySnapshot(JSON.parse(event.data) as DemoSnapshot);
 
     return () => {
@@ -107,42 +111,34 @@ export default function App() {
     };
   }, [applySnapshot]);
 
-  const start = async () => {
-    setBusy(true);
+  const runAction = async (action: BusyAction, request: () => Promise<DemoSnapshot>) => {
+    setBusyAction(action);
     try {
-      const next = await postSnapshot("/api/demo/start", config);
+      const next = await request();
       applySnapshot(next);
+    } catch {
+      setConnectionStatus("ошибка запроса");
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
-  const stop = async () => {
-    setBusy(true);
-    try {
-      const next = await postSnapshot("/api/demo/stop");
-      applySnapshot(next);
-    } finally {
-      setBusy(false);
-    }
-  };
+  const start = async () => runAction("start", () => postSnapshot("/api/demo/start", config));
+
+  const stop = async () => runAction("stop", () => postSnapshot("/api/demo/stop"));
 
   const reset = async () => {
-    setBusy(true);
-    try {
-      previous.current = null;
-      setRates({});
-      const next = await postSnapshot("/api/demo/reset");
-      applySnapshot(next);
-    } finally {
-      setBusy(false);
-    }
+    previous.current = null;
+    setRates({});
+    await runAction("reset", () => postSnapshot("/api/demo/reset"));
   };
 
   const totalWritten = useMemo(
     () => snapshot.modes.reduce((sum, mode) => sum + mode.written, 0),
     [snapshot.modes],
   );
+  const state = busyAction ?? snapshot.state;
+  const commandBusy = busyAction !== null || isTransitionState(snapshot.state);
 
   return (
     <main className="app-shell">
@@ -152,9 +148,9 @@ export default function App() {
           <h1>Сравнение обработки горячего символа</h1>
         </div>
         <div className="status-cluster" aria-label="Состояние демо">
-          <span className={`status-dot ${snapshot.running ? "is-running" : ""}`} />
-          <span>{snapshot.running ? "работает" : "остановлено"}</span>
-          <span className="muted">{status}</span>
+          <span className={`status-dot ${snapshot.running ? "is-running" : ""} ${isTransitionState(state) ? "is-busy" : ""}`} />
+          <span>{stateLabel(state)}</span>
+          <span className="muted">{connectionStatus}</span>
         </div>
       </header>
 
@@ -236,14 +232,14 @@ export default function App() {
         </div>
 
         <div className="command-cluster">
-          <button type="submit" className="primary" disabled={busy}>
-            {snapshot.running ? "Применить и перезапустить" : "Запустить"}
+          <button type="submit" className="primary" disabled={commandBusy}>
+            {startButtonText(busyAction, snapshot.running)}
           </button>
-          <button type="button" onClick={stop} disabled={busy || !snapshot.running}>
-            Остановить
+          <button type="button" onClick={stop} disabled={commandBusy || snapshot.state !== "running"}>
+            {busyAction === "stop" ? "Останавливаю..." : "Остановить"}
           </button>
-          <button type="button" onClick={reset} disabled={busy}>
-            Очистить БД
+          <button type="button" onClick={reset} disabled={commandBusy}>
+            {busyAction === "reset" ? "Очищаю..." : "Очистить БД"}
           </button>
         </div>
       </form>
@@ -404,9 +400,43 @@ function modeCaption(mode: string) {
       return "Каналы: ключ = символ";
     case "channels-dedup-key":
       return "Каналы: ключ = ключ тика";
-    case "dataflow-dedup-key":
-      return "TPL Dataflow: ключ = ключ тика";
     default:
       return mode;
   }
+}
+
+function isTransitionState(state: string) {
+  return state === "start"
+    || state === "stop"
+    || state === "reset"
+    || state === "starting"
+    || state === "stopping"
+    || state === "resetting";
+}
+
+function stateLabel(state: string) {
+  switch (state) {
+    case "start":
+    case "starting":
+      return "запускается";
+    case "running":
+      return "работает";
+    case "stop":
+    case "stopping":
+      return "останавливается";
+    case "reset":
+    case "resetting":
+      return "очищается БД";
+    case "stopped":
+      return "остановлено";
+    default:
+      return state;
+  }
+}
+
+function startButtonText(action: BusyAction | null, running: boolean) {
+  if (action === "start") return running ? "Перезапускаю..." : "Запускаю...";
+  if (action === "stop") return "Дренаж...";
+  if (action === "reset") return "Очищаю...";
+  return running ? "Применить и перезапустить" : "Запустить";
 }

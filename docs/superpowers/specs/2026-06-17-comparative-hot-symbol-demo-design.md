@@ -2,11 +2,10 @@
 
 ## Goal
 
-Show three correct processing approaches on the same hot-ticker workload:
+Show two processing approaches on the same hot-ticker workload:
 
 1. Channels with `Symbol` partitioning.
 2. Channels with dedup-key partitioning.
-3. TPL Dataflow with dedup-key partitioning.
 
 The demo must use real PostgreSQL through Docker Compose, expose a React UI, and keep the existing tested pipeline path intact.
 
@@ -21,8 +20,6 @@ IShardPartitioner
 ```
 
 `TickPipeline` keeps the same bounded channel topology and accepts an `IShardPartitioner`. The default remains `SymbolShardPartitioner`.
-
-Add `DataflowTickPipeline` as a separate implementation for the correct TPL Dataflow approach. It uses bounded blocks, explicit completion propagation, and one single-reader dedup owner per partition. It must not share mutable dedup state across parallel delegates.
 
 Add a demo host:
 
@@ -52,7 +49,7 @@ Controls:
 
 Live-safe controls (`rate`, `hotSymbolRatio`, `duplicateRate`) apply immediately. Topology controls (`shardCount`, `writerCount`, `batchSize`) apply via stop/drain/restart.
 
-The UI shows three side-by-side pipelines with per-shard throughput, backlog, deduplicated count, written count, and PostgreSQL row count.
+The UI shows both pipelines with per-shard throughput, backlog, deduplicated count, written count, and PostgreSQL row count.
 
 ## Docker Compose
 
@@ -78,8 +75,7 @@ Processing tests:
 - dedup-key partitioning spreads one hot symbol across shards;
 - duplicate tick keys still route to one shard;
 - both Channels modes deduplicate correctly;
-- Dataflow mode deduplicates correctly;
-- comparative runner feeds identical ticks to all modes.
+- comparative runner feeds identical ticks to both modes.
 
 Persistence/demo tests:
 

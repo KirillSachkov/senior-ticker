@@ -1,7 +1,17 @@
 namespace SeniorTicker.DemoHost.Demo;
 
+public static class DemoRunStates
+{
+    public const string Stopped = "stopped";
+    public const string Starting = "starting";
+    public const string Running = "running";
+    public const string Stopping = "stopping";
+    public const string Resetting = "resetting";
+}
+
 public sealed record DemoSnapshot(
     bool Running,
+    string State,
     DemoConfig Config,
     DateTimeOffset Timestamp,
     ModeSnapshot[] Modes);
