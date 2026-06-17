@@ -17,12 +17,18 @@ public sealed class TickPipeline
     private readonly ITickSink _sink;
     private readonly IMetricsSink _metrics;
     private readonly TimeProvider _time;
+    private readonly IShardPartitioner _partitioner;
 
     private readonly Channel<Tick> _ingest;
     private readonly Channel<Tick>[] _shards;
     private readonly Channel<Tick[]> _batches;
 
-    public TickPipeline(PipelineOptions options, ITickSink sink, IMetricsSink metrics, TimeProvider time)
+    public TickPipeline(
+        PipelineOptions options,
+        ITickSink sink,
+        IMetricsSink metrics,
+        TimeProvider time,
+        IShardPartitioner? partitioner = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.ShardCount);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.WriterCount);
@@ -37,6 +43,7 @@ public sealed class TickPipeline
         _sink = sink;
         _metrics = metrics;
         _time = time;
+        _partitioner = partitioner ?? new SymbolShardPartitioner();
 
         _ingest = Channel.CreateBounded<Tick>(new BoundedChannelOptions(options.IngestCapacity)
         {
@@ -72,6 +79,8 @@ public sealed class TickPipeline
 
     /// <summary>Глубина батч-канала (для метрик §12: полный → лимитер БД).</summary>
     public int BatchDepth => _batches.Reader.Count;
+
+    public int[] ShardDepths => _shards.Select(s => s.Reader.Count).ToArray();
 
     public async Task RunAsync(CancellationToken ct)
     {
@@ -129,7 +138,7 @@ public sealed class TickPipeline
             await foreach (var tick in _ingest.Reader.ReadAllAsync(ct).ConfigureAwait(false))
             {
                 _metrics.OnReceived();
-                var shard = _shards[StableHash.ShardOf(tick.Symbol, _shards.Length)];
+                var shard = _shards[_partitioner.GetShard(tick, _shards.Length)];
                 await shard.Writer.WriteAsync(tick, ct).ConfigureAwait(false); // backpressure #1
             }
         }

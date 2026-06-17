@@ -30,3 +30,10 @@ secrets.json
 
 # dotnet tools / restore
 .packages/
+
+# Frontend build output
+node_modules/
+dist/
+*.tsbuildinfo
+frontend/**/vite.config.js
+frontend/**/vite.config.d.ts

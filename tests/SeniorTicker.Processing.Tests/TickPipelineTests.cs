@@ -8,7 +8,8 @@ namespace SeniorTicker.Processing.Tests;
 public class TickPipelineTests
 {
     private static TickPipeline Make(ITickSink sink, CountingMetricsSink metrics,
-        FakeTimeProvider time, int shards = 1, int writers = 2, int batchMaxSize = 100)
+        FakeTimeProvider time, int shards = 1, int writers = 2, int batchMaxSize = 100,
+        IShardPartitioner? partitioner = null)
         => new(new PipelineOptions
         {
             ShardCount = shards,
@@ -16,7 +17,7 @@ public class TickPipelineTests
             BatchMaxSize = batchMaxSize,
             BatchMaxDelay = TimeSpan.FromMilliseconds(50),
             DedupWindow = TimeSpan.FromMinutes(1),
-        }, sink, metrics, time);
+        }, sink, metrics, time, partitioner);
 
     [Fact]
     public async Task Writes_all_unique_ticks_and_drains_on_completion()
@@ -80,6 +81,29 @@ public class TickPipelineTests
 
         Assert.Single(sink.All);                          // 1 уникальный, 9 отсеяно одним шардом
         Assert.Equal(9, Interlocked.Read(ref metrics.Deduplicated));
+    }
+
+    [Fact]
+    public async Task Dedup_key_partitioning_deduplicates_hot_symbol_across_shards()
+    {
+        var sink = new InMemoryTickSink();
+        var metrics = new CountingMetricsSink();
+        var time = new FakeTimeProvider();
+        var pipeline = Make(sink, metrics, time, shards: 8, partitioner: new DedupKeyShardPartitioner());
+
+        var run = pipeline.RunAsync(CancellationToken.None);
+        for (var i = 0; i < 10_000; i++)
+        {
+            var sourceId = i % 1_000; // 10 repeats for every unique key
+            await pipeline.Input.WriteAsync(TickFactory.New("BTCUSDT", sourceId));
+        }
+
+        pipeline.Input.Complete();
+        await run.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(1_000, sink.All.Count);
+        Assert.Equal(9_000, Interlocked.Read(ref metrics.Deduplicated));
+        Assert.Equal(1_000, sink.All.Select(t => t.Key).Distinct().Count());
     }
 
     [Fact]

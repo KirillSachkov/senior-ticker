@@ -43,6 +43,28 @@ dotnet test          # все тесты (integration/persistence требуют
 dotnet build         # 0 warnings (TreatWarningsAsErrors=true)
 ```
 
+### Визуальная демонстрация hot symbol
+
+Демо поднимает реальный PostgreSQL, backend с тремя пайплайнами и React UI:
+
+```bash
+docker compose up --build
+```
+
+- UI: http://localhost:5173
+- API health: http://localhost:5080/api/health
+- PostgreSQL: `localhost:5432`, database `senior_ticker`, user/password `postgres/postgres`
+
+В UI сравниваются три режима:
+
+| Режим | Что показывает |
+|---|---|
+| `Channels: Symbol` | базовый вариант: все тики одного `Symbol` попадают в один shard; корректно, но hot symbol упирается в одного consumer'а |
+| `Channels: Dedup key` | тот же Channels-пайплайн, но partition key = полный ключ дедупликации; один hot symbol распределяется по shard'ам |
+| `TPL Dataflow: Dedup key` | вариант на TPL Dataflow с bounded blocks, per-shard single-writer дедупом и параллельными writer'ами |
+
+Ручки демо: входная нагрузка, доля hot symbol, доля дублей, количество shard'ов, writer'ов, размер batch и искусственная задержка записи в БД. Повторное нажатие `Применить и перезапустить` пересобирает все три режима с новым конфигом.
+
 ---
 
 ## Архитектура
