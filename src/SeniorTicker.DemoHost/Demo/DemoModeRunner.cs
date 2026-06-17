@@ -92,10 +92,6 @@ public sealed class DemoModeRunner
             producer = _producerTask;
             channels = _channels;
             channelsTask = _channelsTask;
-            _producerCts = null;
-            _producerTask = null;
-            _channels = null;
-            _channelsTask = null;
         }
 
         if (cts is not null)
@@ -111,6 +107,18 @@ public sealed class DemoModeRunner
 
         if (channelsTask is not null)
             await channelsTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+        lock (_gate)
+        {
+            if (ReferenceEquals(_producerCts, cts))
+                _producerCts = null;
+            if (ReferenceEquals(_producerTask, producer))
+                _producerTask = null;
+            if (ReferenceEquals(_channels, channels))
+                _channels = null;
+            if (ReferenceEquals(_channelsTask, channelsTask))
+                _channelsTask = null;
+        }
 
         cts?.Dispose();
     }
@@ -147,11 +155,16 @@ public sealed class DemoModeRunner
             var count = Math.Max(1, config.RatePerSecond / 10);
             for (var i = 0; i < count; i++)
             {
+                ct.ThrowIfCancellationRequested();
+
                 var tick = CreateTick(sequence++, config);
                 var shard = _partitioner.GetShard(tick, config.ShardCount);
+                var channels = _channels;
 
-                if (_channels is not null)
-                    await _channels.Input.WriteAsync(tick, ct);
+                if (channels is null)
+                    return;
+
+                await channels.Input.WriteAsync(tick, ct);
 
                 Interlocked.Increment(ref _accepted);
                 Interlocked.Increment(ref _shardAccepted[shard]);

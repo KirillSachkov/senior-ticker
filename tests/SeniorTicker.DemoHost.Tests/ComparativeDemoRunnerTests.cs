@@ -67,6 +67,38 @@ public class ComparativeDemoRunnerTests(DemoPostgresFixture fx)
     }
 
     [Fact]
+    public async Task Stop_keeps_metrics_consistent_under_backpressure()
+    {
+        var db = new DemoDatabase(fx.DataSource);
+        var runner = new ComparativeDemoRunner(db, fx.DataSource);
+
+        await runner.ResetAsync(CancellationToken.None);
+        await runner.StartAsync(new DemoConfig
+        {
+            RatePerSecond = 40_000,
+            HotSymbolPercent = 95,
+            DuplicatePercent = 12,
+            ShardCount = 13,
+            WriterCount = 5,
+            BatchMaxSize = 145,
+            SinkDelayMs = 45,
+        }, CancellationToken.None);
+
+        await Task.Delay(700);
+        await runner.StopAsync(CancellationToken.None);
+
+        var snapshot = runner.Snapshot();
+        Assert.Equal(DemoRunStates.Stopped, snapshot.State);
+        Assert.All(snapshot.Modes, mode =>
+        {
+            Assert.Equal(mode.Accepted, mode.Received);
+            Assert.Equal(mode.Accepted - mode.Deduplicated, mode.Written);
+            Assert.Equal(mode.Written, mode.DbRows);
+            Assert.Empty(mode.ShardDepths);
+        });
+    }
+
+    [Fact]
     public async Task Reset_clears_database_and_visible_counters()
     {
         var db = new DemoDatabase(fx.DataSource);
