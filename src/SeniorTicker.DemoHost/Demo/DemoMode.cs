@@ -19,9 +19,9 @@ public static class DemoModeNames
 
     public static string ToDisplayName(this DemoMode mode) => mode switch
     {
-        DemoMode.ChannelsSymbol => "Channels: Symbol",
-        DemoMode.ChannelsDedupKey => "Channels: Dedup key",
-        DemoMode.DataflowDedupKey => "TPL Dataflow: Dedup key",
+        DemoMode.ChannelsSymbol => "Каналы: шардинг по символу",
+        DemoMode.ChannelsDedupKey => "Каналы: шардинг по ключу тика",
+        DemoMode.DataflowDedupKey => "TPL Dataflow: шардинг по ключу тика",
         _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null),
     };
 }

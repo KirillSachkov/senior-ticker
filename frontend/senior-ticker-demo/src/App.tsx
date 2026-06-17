@@ -97,7 +97,7 @@ export default function App() {
       });
 
     const events = new EventSource("/api/demo/events");
-    events.onopen = () => setStatus("live");
+    events.onopen = () => setStatus("подключено");
     events.onerror = () => setStatus("переподключение");
     events.onmessage = (event) => applySnapshot(JSON.parse(event.data) as DemoSnapshot);
 
@@ -149,18 +149,26 @@ export default function App() {
       <header className="topbar">
         <div>
           <p className="eyebrow">SeniorTicker</p>
-          <h1>Сравнение обработки hot symbol</h1>
+          <h1>Сравнение обработки горячего символа</h1>
         </div>
         <div className="status-cluster" aria-label="Состояние демо">
           <span className={`status-dot ${snapshot.running ? "is-running" : ""}`} />
-          <span>{snapshot.running ? "running" : "stopped"}</span>
+          <span>{snapshot.running ? "работает" : "остановлено"}</span>
           <span className="muted">{status}</span>
         </div>
       </header>
 
-      <section className="control-band" aria-label="Параметры нагрузки">
+      <form
+        className="control-band"
+        aria-label="Параметры нагрузки"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void start();
+        }}
+      >
         <div className="controls-grid">
           <Control
+            name="rate-per-second"
             label="Тиков в секунду"
             value={config.ratePerSecond}
             min={10}
@@ -169,6 +177,7 @@ export default function App() {
             onChange={(ratePerSecond) => setConfig((current) => ({ ...current, ratePerSecond }))}
           />
           <Control
+            name="hot-symbol-percent"
             label="Доля BTCUSDT"
             value={config.hotSymbolPercent}
             min={0}
@@ -178,6 +187,7 @@ export default function App() {
             onChange={(hotSymbolPercent) => setConfig((current) => ({ ...current, hotSymbolPercent }))}
           />
           <Control
+            name="duplicate-percent"
             label="Дубли"
             value={config.duplicatePercent}
             min={0}
@@ -187,6 +197,7 @@ export default function App() {
             onChange={(duplicatePercent) => setConfig((current) => ({ ...current, duplicatePercent }))}
           />
           <Control
+            name="shard-count"
             label="Шарды"
             value={config.shardCount}
             min={1}
@@ -195,7 +206,8 @@ export default function App() {
             onChange={(shardCount) => setConfig((current) => ({ ...current, shardCount }))}
           />
           <Control
-            label="Writers"
+            name="writer-count"
+            label="Писатели в БД"
             value={config.writerCount}
             min={1}
             max={16}
@@ -203,7 +215,8 @@ export default function App() {
             onChange={(writerCount) => setConfig((current) => ({ ...current, writerCount }))}
           />
           <Control
-            label="Размер batch"
+            name="batch-max-size"
+            label="Размер батча"
             value={config.batchMaxSize}
             min={1}
             max={900}
@@ -211,18 +224,19 @@ export default function App() {
             onChange={(batchMaxSize) => setConfig((current) => ({ ...current, batchMaxSize }))}
           />
           <Control
+            name="sink-delay-ms"
             label="Задержка БД"
             value={config.sinkDelayMs}
             min={0}
             max={250}
             step={5}
-            suffix=" ms"
+            suffix=" мс"
             onChange={(sinkDelayMs) => setConfig((current) => ({ ...current, sinkDelayMs }))}
           />
         </div>
 
         <div className="command-cluster">
-          <button type="button" className="primary" onClick={start} disabled={busy}>
+          <button type="submit" className="primary" disabled={busy}>
             {snapshot.running ? "Применить и перезапустить" : "Запустить"}
           </button>
           <button type="button" onClick={stop} disabled={busy || !snapshot.running}>
@@ -232,11 +246,11 @@ export default function App() {
             Очистить БД
           </button>
         </div>
-      </section>
+      </form>
 
       <section className="summary-strip" aria-label="Сводка">
-        <Metric label="Конфиг" value={`${snapshot.config.shardCount} shards / ${snapshot.config.writerCount} writers`} />
-        <Metric label="Вход" value={`${formatNumber.format(snapshot.config.ratePerSecond)} ticks/s`} />
+        <Metric label="Конфиг" value={`${snapshot.config.shardCount} шардов / ${snapshot.config.writerCount} писателей`} />
+        <Metric label="Вход" value={`${formatNumber.format(snapshot.config.ratePerSecond)} тиков/с`} />
         <Metric label="Записано всего" value={formatNumber.format(totalWritten)} />
       </section>
 
@@ -263,6 +277,7 @@ async function postSnapshot(url: string, body?: DemoConfig): Promise<DemoSnapsho
 }
 
 function Control(props: {
+  name: string;
   label: string;
   value: number;
   min: number;
@@ -271,8 +286,10 @@ function Control(props: {
   suffix?: string;
   onChange: (value: number) => void;
 }) {
+  const id = `control-${props.name}`;
+
   return (
-    <label className="control">
+    <label className="control" htmlFor={id}>
       <span className="control-label">
         <span>{props.label}</span>
         <strong>
@@ -281,6 +298,8 @@ function Control(props: {
         </strong>
       </span>
       <input
+        id={id}
+        name={props.name}
         type="range"
         min={props.min}
         max={props.max}
@@ -313,31 +332,31 @@ function ModeCard({ mode, rates }: { mode: ModeSnapshot; rates?: ModeRates }) {
     <article className="mode-card">
       <header className="mode-header">
         <div>
-          <p className="eyebrow">{mode.mode}</p>
+          <p className="eyebrow">{modeCaption(mode.mode)}</p>
           <h2>{mode.name}</h2>
         </div>
-        <span className={`mode-state ${mode.running ? "active" : ""}`}>{mode.running ? "live" : "idle"}</span>
+        <span className={`mode-state ${mode.running ? "active" : ""}`}>{mode.running ? "работает" : "стоит"}</span>
       </header>
 
-      <div className="pipeline-row" aria-label={`Pipeline ${mode.name}`}>
-        <PipelineStep label="Ingest" value={mode.ingestDepth} tone="yellow" />
-        <PipelineStep label="Router" value={`${Math.round(skew * 100)}%`} tone={skew > 0.7 ? "red" : "green"} />
-        <PipelineStep label="Shards" value={mode.shardDepths.length} tone="green" />
-        <PipelineStep label="Batch" value={mode.batchDepth} tone={mode.batchDepth > 0 ? "yellow" : "green"} />
-        <PipelineStep label="Postgres" value={formatNumber.format(mode.dbRows)} tone="purple" />
+      <div className="pipeline-row" aria-label={`Пайплайн ${mode.name}`}>
+        <PipelineStep label="Вход" value={mode.ingestDepth} tone="yellow" />
+        <PipelineStep label="Роутер" value={`${Math.round(skew * 100)}%`} tone={skew > 0.7 ? "red" : "green"} />
+        <PipelineStep label="Шарды" value={mode.shardDepths.length} tone="green" />
+        <PipelineStep label="Батчи" value={mode.batchDepth} tone={mode.batchDepth > 0 ? "yellow" : "green"} />
+        <PipelineStep label="PostgreSQL" value={formatNumber.format(mode.dbRows)} tone="purple" />
       </div>
 
       <div className="numbers-grid">
-        <Metric label="Accepted" value={formatNumber.format(mode.accepted)} />
-        <Metric label="Received/s" value={formatNumber.format(Math.round(rates?.receivedPerSecond ?? 0))} />
-        <Metric label="Written/s" value={formatNumber.format(Math.round(rates?.writtenPerSecond ?? 0))} />
-        <Metric label="Duplicates" value={formatNumber.format(mode.deduplicated)} />
-        <Metric label="Pending unique" value={formatNumber.format(uniquePending)} />
-        <Metric label="Pressure" value={formatNumber.format(pressure)} />
+        <Metric label="Принято" value={formatNumber.format(mode.accepted)} />
+        <Metric label="Получено/с" value={formatNumber.format(Math.round(rates?.receivedPerSecond ?? 0))} />
+        <Metric label="Записано/с" value={formatNumber.format(Math.round(rates?.writtenPerSecond ?? 0))} />
+        <Metric label="Пропущено дублей" value={formatNumber.format(mode.deduplicated)} />
+        <Metric label="Ожидают записи" value={formatNumber.format(uniquePending)} />
+        <Metric label="Очереди всего" value={formatNumber.format(pressure)} />
       </div>
 
-      <ShardChart title="Распределение входа по shard" values={mode.shardAccepted} max={acceptedMax} />
-      <ShardChart title="Глубина очередей shard" values={mode.shardDepths} max={depthMax} compact />
+      <ShardChart title="Распределение входа по шардам" values={mode.shardAccepted} max={acceptedMax} />
+      <ShardChart title="Глубина очередей шардов" values={mode.shardDepths} max={depthMax} compact />
     </article>
   );
 }
@@ -374,7 +393,20 @@ function ShardChart(props: { title: string; values: number[]; max: number; compa
 }
 
 function shortNumber(value: number) {
-  if (value >= 1_000_000) return `${Math.round(value / 100_000) / 10}m`;
-  if (value >= 1_000) return `${Math.round(value / 100) / 10}k`;
+  if (value >= 1_000_000) return `${Math.round(value / 100_000) / 10} млн`;
+  if (value >= 1_000) return `${Math.round(value / 100) / 10} тыс`;
   return String(value);
+}
+
+function modeCaption(mode: string) {
+  switch (mode) {
+    case "channels-symbol":
+      return "Каналы: ключ = символ";
+    case "channels-dedup-key":
+      return "Каналы: ключ = ключ тика";
+    case "dataflow-dedup-key":
+      return "TPL Dataflow: ключ = ключ тика";
+    default:
+      return mode;
+  }
 }

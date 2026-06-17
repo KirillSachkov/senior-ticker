@@ -23,6 +23,7 @@ public sealed class DemoModeRunner
     private CancellationTokenSource? _producerCts;
     private Task? _producerTask;
     private long _accepted;
+    private long _lastUniqueKey = -1;
     private long[] _shardAccepted = [];
 
     public DemoModeRunner(DemoMode mode, NpgsqlDataSource dataSource, IShardPartitioner partitioner, bool useDataflow)
@@ -43,6 +44,7 @@ public sealed class DemoModeRunner
             _metrics = new DemoMetricsSink();
             _sink = new DemoPostgresSink(_dataSource, _mode.ToWireName(), _config.SinkDelayMs);
             _accepted = 0;
+            _lastUniqueKey = -1;
             _shardAccepted = new long[_config.ShardCount];
             _producerCts = new CancellationTokenSource();
 
@@ -166,12 +168,16 @@ public sealed class DemoModeRunner
         }
     }
 
-    private static Tick CreateTick(long sequence, DemoConfig config)
+    private Tick CreateTick(long sequence, DemoConfig config)
     {
-        var duplicateEvery = config.DuplicatePercent == 0 ? 0 : Math.Max(2, 100 / config.DuplicatePercent);
-        var key = duplicateEvery > 0 && sequence > 0 && sequence % duplicateEvery == 0
-            ? sequence - 1
-            : sequence;
+        var duplicate = config.DuplicatePercent > 0
+            && _lastUniqueKey >= 0
+            && sequence % 100 < config.DuplicatePercent;
+        var key = duplicate ? _lastUniqueKey : sequence;
+
+        if (!duplicate)
+            _lastUniqueKey = key;
+
         var symbol = key % 100 < config.HotSymbolPercent
             ? "BTCUSDT"
             : ColdSymbols[(int)(key % ColdSymbols.Length)];
