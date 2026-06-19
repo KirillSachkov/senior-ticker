@@ -7,10 +7,10 @@ using SeniorTicker.Host.Configuration;
 namespace SeniorTicker.Host.Ingestion;
 
 /// <summary>
-/// Запускает все enabled-коннекторы и держит их живыми до остановки. Регистрируется ПОСЛЕДНИМ →
-/// по LIFO-порядку Generic Host останавливается ПЕРВЫМ: отмена <c>stoppingToken</c> гасит reconnect
-/// (Polly v8 не ретраит OCE, #6), коннекторы выходят, вход конвейера перекрыт — и только потом
-/// начинается дренаж (<see cref="Pipeline.PipelineHostedService"/>). Это фаза ① двухфазного шатдауна §5.4.
+/// Запускает все enabled-коннекторы и держит их живыми до остановки. Каждый коннектор обрабатывает
+/// тик прямо на своём потоке через <c>ITickIngestor</c> (наивный вариант: общий дедуп + запись по тику).
+/// На остановке <c>stoppingToken</c> гасит коннекторы; дренажа нет — тики «в полёте» теряются.
+/// Так и выглядит простой вариант: ни очереди, ни двухфазного завершения.
 /// </summary>
 public sealed class ConnectorHostedService(
     ConnectorFactory factory,

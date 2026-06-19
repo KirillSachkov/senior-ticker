@@ -9,7 +9,6 @@ using SeniorTicker.Host.Configuration;
 using SeniorTicker.Host.Ingestion;
 using SeniorTicker.Host.Observability;
 using SeniorTicker.Host.Persistence;
-using SeniorTicker.Host.Pipeline;
 using SeniorTicker.Infrastructure.Persistence.Postgres;
 using SeniorTicker.Processing;
 using SeniorTicker.Processing.Naive;
@@ -72,9 +71,9 @@ public static class HostingExtensions
         builder.Services.AddSingleton<MetricsSink>();
         builder.Services.AddSingleton<IMetricsSink>(sp => sp.GetRequiredService<MetricsSink>());
 
-        // Наивный конвейер (антипример): общий дедуп, запись по тику, безлимитный вход.
-        builder.Services.AddSingleton<ITickPipeline, NaivePipeline>();
-        builder.Services.AddSingleton<ITickIngestor, ChannelTickIngestor>();
+        // Наивный вариант «в лоб»: обработка прямо на потоке коннектора — общий дедуп + запись по тику.
+        builder.Services.AddSingleton<IDeduplicator, NaiveDeduplicator>(); // ОБЩИЙ на все коннекторы — отсюда гонка
+        builder.Services.AddSingleton<ITickIngestor, NaiveTickIngestor>();
         builder.Services.AddSingleton<ConnectorFactory>();
 
         // Persistence: строка подключения — секрет (env/user-secrets), отсутствие = fail boot (§11).
@@ -103,11 +102,9 @@ public static class HostingExtensions
         });
 
         // Хостед-сервисы — ПОРЯДОК = хореография §5.4 (старт сверху-вниз, останов снизу-вверх).
-        builder.Services.AddHostedService<DatabaseInitializerHostedService>();   // (1) миграции до writers (#10)
-        builder.Services.AddHostedService<MetricsBackgroundService>();           // (2) метрики (живут до конца дренажа)
-        builder.Services.AddSingleton<PipelineHostedService>();
-        builder.Services.AddHostedService(sp => sp.GetRequiredService<PipelineHostedService>()); // (3) конвейер
-        builder.Services.AddHostedService<ConnectorHostedService>();             // (4) коннекторы → стоп ПЕРВЫМ (#5/#6)
+        builder.Services.AddHostedService<DatabaseInitializerHostedService>();   // (1) миграции до записи
+        builder.Services.AddHostedService<MetricsBackgroundService>();           // (2) метрики
+        builder.Services.AddHostedService<ConnectorHostedService>();             // (3) коннекторы обрабатывают тики прямо на своём потоке
 
         return builder;
     }

@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SeniorTicker.Host.Configuration;
-using SeniorTicker.Processing;
 
 namespace SeniorTicker.Host.Observability;
 
@@ -14,7 +13,6 @@ namespace SeniorTicker.Host.Observability;
 /// </summary>
 public sealed class MetricsBackgroundService(
     MetricsSink metrics,
-    ITickPipeline pipeline,
     MetricsConfig config,
     TimeProvider time,
     ILogger<MetricsBackgroundService> logger) : BackgroundService
@@ -31,14 +29,12 @@ public sealed class MetricsBackgroundService(
             {
                 var current = metrics.Snapshot();
                 logger.LogInformation(
-                    "metrics in={In} (+{InDelta}) deduped={Deduped} (+{DedupedDelta}) written={Written} (+{WrittenDelta}) dropped={Dropped} (+{DroppedDelta}) gap={Gap} ingestDepth={IngestDepth} batchDepth={BatchDepth}",
+                    "metrics in={In} (+{InDelta}) deduped={Deduped} (+{DedupedDelta}) written={Written} (+{WrittenDelta}) dropped={Dropped} (+{DroppedDelta}) gap={Gap}",
                     current.Received, current.Received - previous.Received,
                     current.Deduplicated, current.Deduplicated - previous.Deduplicated,
                     current.Written, current.Written - previous.Written,
                     current.Dropped, current.Dropped - previous.Dropped,
-                    current.Gap,
-                    pipeline.IngestDepth,
-                    pipeline.BatchDepth);
+                    current.Gap);
                 previous = current;
             }
         }

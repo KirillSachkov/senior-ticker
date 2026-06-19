@@ -33,7 +33,7 @@ public class SimpleVariantTests
     {
         // Инвариант: 1000 уникальных ключей → 1000 записей (ср. High_parallel_producer_load в TickPipelineTests).
         var sink = new InMemoryTickSink();
-        var processor = new NaiveTickProcessor(new NaiveDeduplicator(), sink); // ОДИН общий дедуп
+        var processor = new NaiveTickIngestor(new NaiveDeduplicator(), sink, new CountingMetricsSink()); // ОДИН общий дедуп
 
         const int producers = 16, perProducer = 500, uniqueKeys = 1000;
         var tasks = Enumerable.Range(0, producers).Select(p => Task.Run(async () =>
@@ -41,7 +41,7 @@ public class SimpleVariantTests
             for (var i = 0; i < perProducer; i++)
             {
                 var id = (p * perProducer + i) % uniqueKeys;
-                await processor.HandleAsync(TickFactory.New($"S{id % 20}", id));
+                await processor.IngestAsync(TickFactory.New($"S{id % 20}", id), default);
             }
         })).ToArray();
         await Task.WhenAll(tasks);
@@ -56,13 +56,13 @@ public class SimpleVariantTests
     {
         // Инвариант: ни один принятый тик не теряется (боевой sink — connection-per-writer, потокобезопасен).
         var sink = new NaiveSharedListSink(); // общий НЕ-потокобезопасный List, как один общий DbContext
-        var processor = new NaiveTickProcessor(new NoopDeduplicator(), sink);
+        var processor = new NaiveTickIngestor(new NoopDeduplicator(), sink, new CountingMetricsSink());
 
         const int producers = 16, perProducer = 500, total = producers * perProducer;
         var tasks = Enumerable.Range(0, producers).Select(p => Task.Run(async () =>
         {
             for (var i = 0; i < perProducer; i++)
-                await processor.HandleAsync(TickFactory.New($"S{p}", p * perProducer + i));
+                await processor.IngestAsync(TickFactory.New($"S{p}", p * perProducer + i), default);
         })).ToArray();
         await Task.WhenAll(tasks);
 
