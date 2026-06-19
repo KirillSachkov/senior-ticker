@@ -31,7 +31,7 @@ public sealed class ConnectorHostedService(
 
         try
         {
-            await Task.WhenAll(connectors.Select(c => c.RunAsync(stoppingToken))).ConfigureAwait(false);
+            await Task.WhenAll(connectors.Select(c => c.RunAsync(stoppingToken)));
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {

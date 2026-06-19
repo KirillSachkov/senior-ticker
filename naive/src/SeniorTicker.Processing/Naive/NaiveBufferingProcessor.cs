@@ -20,7 +20,7 @@ public sealed class NaiveBufferingProcessor(ITickSink sink)
         var buffer = new List<Tick>();
         try
         {
-            await foreach (var tick in _input.Reader.ReadAllAsync(hostToken).ConfigureAwait(false))
+            await foreach (var tick in _input.Reader.ReadAllAsync(hostToken))
                 buffer.Add(tick);
         }
         catch (OperationCanceledException)
@@ -31,6 +31,6 @@ public sealed class NaiveBufferingProcessor(ITickSink sink)
 
         // сюда попадаем только при штатном завершении канала (которого при отмене не будет)
         if (buffer.Count > 0)
-            await sink.WriteBatchAsync(buffer.ToArray(), CancellationToken.None).ConfigureAwait(false);
+            await sink.WriteBatchAsync(buffer.ToArray(), CancellationToken.None);
     }
 }

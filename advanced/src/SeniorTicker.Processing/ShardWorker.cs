@@ -22,7 +22,7 @@ public sealed class ShardWorker(
         ChannelWriter<Tick[]> sink,
         CancellationToken ct)
     {
-        while (await source.WaitToReadAsync(ct).ConfigureAwait(false))
+        while (await source.WaitToReadAsync(ct))
         {
             var batch = new List<Tick>(maxSize);
             using var timerCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -38,22 +38,22 @@ public sealed class ShardWorker(
                 }
 
                 var ready = source.WaitToReadAsync(ct).AsTask();
-                var winner = await Task.WhenAny(ready, timer).ConfigureAwait(false);
+                var winner = await Task.WhenAny(ready, timer);
                 if (winner == timer) break;             // флаш по времени T
-                if (!await ready.ConfigureAwait(false)) break; // источник завершён
+                if (!await ready) break; // источник завершён
             }
 
             timerCts.Cancel();
-            await ObserveAsync(timer).ConfigureAwait(false);
+            await ObserveAsync(timer);
 
             if (batch.Count > 0)
-                await sink.WriteAsync(batch.ToArray(), ct).ConfigureAwait(false);
+                await sink.WriteAsync(batch.ToArray(), ct);
         }
     }
 
     private static async Task ObserveAsync(Task task)
     {
-        try { await task.ConfigureAwait(false); }
+        try { await task; }
         catch (OperationCanceledException) { /* ожидаемо при отмене таймера */ }
     }
 }

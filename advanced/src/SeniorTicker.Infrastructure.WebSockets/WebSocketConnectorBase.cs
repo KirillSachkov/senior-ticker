@@ -28,8 +28,8 @@ public sealed class WebSocketConnectorBase(
             logger.LogWarning(ex, "{Name}: reconnect attempt {Attempt} in {Delay}", Name, attempt + 1, delay));
         try
         {
-            await pipeline.ExecuteAsync(async token => await ConnectAndConsumeAsync(token).ConfigureAwait(false), ct)
-                .ConfigureAwait(false);
+            await pipeline.ExecuteAsync(async token => await ConnectAndConsumeAsync(token), ct)
+                ;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -40,13 +40,13 @@ public sealed class WebSocketConnectorBase(
     private async Task ConnectAndConsumeAsync(CancellationToken ct)
     {
         using var socket = socketFactory();
-        await ConnectWithTimeoutAsync(socket, ct).ConfigureAwait(false);
+        await ConnectWithTimeoutAsync(socket, ct);
         logger.LogInformation("{Name}: connected to {Url}", Name, options.Url);
 
         var receiver = new WebSocketMessageReceiver(options.InitialReceiveBufferBytes, options.MaxMessageBytes);
         while (!ct.IsCancellationRequested)
         {
-            using var msg = await ReceiveWithIdleTimeoutAsync(receiver, socket, ct).ConfigureAwait(false);
+            using var msg = await ReceiveWithIdleTimeoutAsync(receiver, socket, ct);
             if (msg.IsClosed)
             {
                 logger.LogInformation("{Name}: server closed connection — reconnecting", Name);
@@ -71,7 +71,7 @@ public sealed class WebSocketConnectorBase(
 
             if (!parsed) { metrics.OnDropped(); continue; }
             if (!TickValidator.IsValid(tick, time)) { metrics.OnDropped(); continue; }
-            await ingestor.IngestAsync(tick, ct).ConfigureAwait(false);
+            await ingestor.IngestAsync(tick, ct);
         }
     }
 
@@ -82,7 +82,7 @@ public sealed class WebSocketConnectorBase(
         cts.CancelAfter(options.ConnectTimeout);
         try
         {
-            await socket.ConnectAsync(options.Url, cts.Token).ConfigureAwait(false);
+            await socket.ConnectAsync(options.Url, cts.Token);
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested && !ct.IsCancellationRequested)
         {
@@ -98,7 +98,7 @@ public sealed class WebSocketConnectorBase(
         cts.CancelAfter(options.ReceiveIdleTimeout);
         try
         {
-            return await receiver.ReceiveAsync(socket, cts.Token).ConfigureAwait(false);
+            return await receiver.ReceiveAsync(socket, cts.Token);
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested && !ct.IsCancellationRequested)
         {

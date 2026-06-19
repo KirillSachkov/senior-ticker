@@ -27,7 +27,7 @@ public sealed class MetricsBackgroundService(
 
         try
         {
-            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
+            while (await timer.WaitForNextTickAsync(stoppingToken))
             {
                 var current = metrics.Snapshot();
                 logger.LogInformation(

@@ -28,12 +28,12 @@ public sealed class NaivePipeline(ITickSink sink, IMetricsSink metrics) : ITickP
         var workers = Enumerable.Range(0, Math.Max(2, Environment.ProcessorCount / 2))
             .Select(_ => Task.Run(() => WorkAsync(ct), ct))
             .ToArray();
-        await Task.WhenAll(workers).ConfigureAwait(false);
+        await Task.WhenAll(workers);
     }
 
     private async Task WorkAsync(CancellationToken ct)
     {
-        await foreach (var tick in _ingest.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+        await foreach (var tick in _ingest.Reader.ReadAllAsync(ct))
         {
             metrics.OnReceived();
             if (_dedup.IsDuplicate(tick))
@@ -42,7 +42,7 @@ public sealed class NaivePipeline(ITickSink sink, IMetricsSink metrics) : ITickP
                 continue;
             }
 
-            await sink.WriteBatchAsync(new[] { tick }, ct).ConfigureAwait(false);
+            await sink.WriteBatchAsync(new[] { tick }, ct);
             metrics.OnWritten(1);
         }
     }

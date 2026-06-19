@@ -57,7 +57,7 @@ public sealed class PipelineHostedService(
         {
             // ② ждём дренаж в пределах drain-дедлайна на инъектированном TimeProvider (детерминизм в тестах).
             // НЕ дёргаем abort — это штатный путь. Чистое завершение — единственное место «drained cleanly».
-            await _run.WaitAsync(drain, time, cancellationToken).ConfigureAwait(false);
+            await _run.WaitAsync(drain, time, cancellationToken);
             logger.LogInformation("Pipeline drained cleanly.");
             return;
         }
@@ -80,19 +80,19 @@ public sealed class PipelineHostedService(
         }
 
         // Сюда попадаем только по Timeout/OCE: форсируем abort и наблюдаем результат.
-        await ForceAbortAsync().ConfigureAwait(false);
+        await ForceAbortAsync();
 
         // Если форс-abort вскрыл фатал (а не чистую отмену) — поднимаем его (вторая, abort-ветка ре-сёрфейса).
         if (_run.IsFaulted)
-            await _run.ConfigureAwait(false);
+            await _run;
     }
 
     private async Task ForceAbortAsync()
     {
-        await _abort.CancelAsync().ConfigureAwait(false);
+        await _abort.CancelAsync();
         try
         {
-            await _run!.ConfigureAwait(false);
+            await _run!;
         }
         catch (OperationCanceledException)
         {

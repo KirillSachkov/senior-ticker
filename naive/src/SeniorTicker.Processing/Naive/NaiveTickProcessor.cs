@@ -16,6 +16,6 @@ public sealed class NaiveTickProcessor(IDeduplicator dedup, ITickSink sink)
         if (dedup.IsDuplicate(tick))
             return;
 
-        await sink.WriteBatchAsync(new[] { tick }, ct).ConfigureAwait(false);
+        await sink.WriteBatchAsync(new[] { tick }, ct);
     }
 }

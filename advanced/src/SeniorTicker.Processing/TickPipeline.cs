@@ -110,7 +110,7 @@ public sealed class TickPipeline
         all.AddRange(writerTasks);
         try
         {
-            await Task.WhenAll(all).ConfigureAwait(false);
+            await Task.WhenAll(all);
         }
         catch
         {
@@ -127,7 +127,7 @@ public sealed class TickPipeline
 
     private async Task CompleteBatchesWhenShardsDoneAsync(Task[] shardTasks)
     {
-        try { await Task.WhenAll(shardTasks).ConfigureAwait(false); }
+        try { await Task.WhenAll(shardTasks); }
         finally { _batches.Writer.TryComplete(); }
     }
 
@@ -135,11 +135,11 @@ public sealed class TickPipeline
     {
         try
         {
-            await foreach (var tick in _ingest.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+            await foreach (var tick in _ingest.Reader.ReadAllAsync(ct))
             {
                 _metrics.OnReceived();
                 var shard = _shards[_partitioner.GetShard(tick, _shards.Length)];
-                await shard.Writer.WriteAsync(tick, ct).ConfigureAwait(false); // backpressure #1
+                await shard.Writer.WriteAsync(tick, ct); // backpressure #1
             }
         }
         finally
@@ -154,9 +154,9 @@ public sealed class TickPipeline
     {
         try
         {
-            await foreach (var batch in _batches.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+            await foreach (var batch in _batches.Reader.ReadAllAsync(ct))
             {
-                await _sink.WriteBatchAsync(batch, ct).ConfigureAwait(false);
+                await _sink.WriteBatchAsync(batch, ct);
                 _metrics.OnWritten(batch.Length);
             }
         }

@@ -33,7 +33,7 @@ public sealed class WebSocketMessageReceiver(int initialBufferBytes, int maxMess
                     capacity = Math.Min(buffer.Length, maxMessageBytes);
                 }
 
-                var result = await socket.ReceiveAsync(buffer.AsMemory(total, capacity - total), ct).ConfigureAwait(false);
+                var result = await socket.ReceiveAsync(buffer.AsMemory(total, capacity - total), ct);
                 if (result.MessageType == WebSocketMessageType.Close)
                 {
                     ArrayPool<byte>.Shared.Return(buffer);

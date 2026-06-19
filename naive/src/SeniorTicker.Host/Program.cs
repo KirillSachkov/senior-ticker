@@ -13,7 +13,7 @@ try
     builder.AddSeniorTicker();
 
     using var host = builder.Build();
-    await host.RunAsync().ConfigureAwait(false);
+    await host.RunAsync();
     return 0;
 }
 catch (Exception ex)

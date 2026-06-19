@@ -38,7 +38,7 @@ public sealed class GatedTickSink : ITickSink
 
     public async Task WriteBatchAsync(ReadOnlyMemory<Tick> batch, CancellationToken ct)
     {
-        await _open.Task.WaitAsync(ct).ConfigureAwait(false);
+        await _open.Task.WaitAsync(ct);
         foreach (var t in batch.Span)
             _all.Enqueue(t);
     }

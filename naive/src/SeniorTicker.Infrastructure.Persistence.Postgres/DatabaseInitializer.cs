@@ -10,7 +10,7 @@ public sealed class DatabaseInitializer(IDbContextFactory<TickDbContext> factory
 {
     public async Task InitializeAsync(CancellationToken ct)
     {
-        await using var db = await factory.CreateDbContextAsync(ct).ConfigureAwait(false);
-        await db.Database.MigrateAsync(ct).ConfigureAwait(false);
+        await using var db = await factory.CreateDbContextAsync(ct);
+        await db.Database.MigrateAsync(ct);
     }
 }

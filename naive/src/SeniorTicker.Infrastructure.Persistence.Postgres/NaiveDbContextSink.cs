@@ -29,7 +29,7 @@ public sealed class NaiveDbContextSink(IDbContextFactory<TickDbContext> factory)
                 SourceId = t.SourceId,
                 IngestTimestamp = t.IngestTimestamp,
             });
-            await _db.SaveChangesAsync(ct).ConfigureAwait(false); // запрос в БД на каждый тик
+            await _db.SaveChangesAsync(ct); // запрос в БД на каждый тик
         }
     }
 

@@ -115,7 +115,7 @@ public class SimpleVariantTests
                 for (var i = 0; i < batch.Length; i++)
                 {
                     _all.Add(batch.Span[i]);
-                    await Task.Delay(1, ct).ConfigureAwait(false); // окно, чтобы параллельный вход поймал занятость
+                    await Task.Delay(1, ct); // окно, чтобы параллельный вход поймал занятость
                 }
             }
             finally

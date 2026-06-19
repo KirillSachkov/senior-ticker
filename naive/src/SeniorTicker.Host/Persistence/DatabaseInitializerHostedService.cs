@@ -17,7 +17,7 @@ public sealed class DatabaseInitializerHostedService(
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         logger.LogInformation("Applying database migrations…");
-        await initializer.InitializeAsync(cancellationToken).ConfigureAwait(false);
+        await initializer.InitializeAsync(cancellationToken);
         logger.LogInformation("Database schema ready.");
     }
 
