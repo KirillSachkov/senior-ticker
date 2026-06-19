@@ -1,36 +1,49 @@
-using System.Threading.Channels;
 using SeniorTicker.Application;
 using SeniorTicker.Domain;
 
 namespace SeniorTicker.Processing.Naive;
 
 /// <summary>
-/// «Простой вариант» остановки: один общий токен останавливает и приём, и запись. Принятые,
-/// но ещё не записанные тики теряются при штатной остановке. Антипример к двухфазному дренажу
-/// (Input.Complete() → дочитать очереди → дописать) в <see cref="TickPipeline"/>.
+/// «Простой вариант» остановки: тики копятся в обычном списке, а отдельный флашер пишет накопленное
+/// пачкой раз в интервал — и всё на ОДНОМ общем токене. При штатной остановке токен рубит и ожидание,
+/// и запись: накопленный буфер не дописан = потеря данных. Никаких Channel — наивный вариант их не
+/// использует; правильная остановка (двухфазный дренаж: закрыть вход → дочитать → дописать) — в advanced.
 /// </summary>
 public sealed class NaiveBufferingProcessor(ITickSink sink)
 {
-    private readonly Channel<Tick> _input = Channel.CreateUnbounded<Tick>();
+    private readonly List<Tick> _buffer = [];
+    private readonly object _gate = new();
 
-    public ChannelWriter<Tick> Input => _input.Writer;
+    /// <summary>Коннектор просто кладёт тик в общий буфер.</summary>
+    public void Add(Tick tick)
+    {
+        lock (_gate)
+            _buffer.Add(tick);
+    }
 
     public async Task RunAsync(CancellationToken hostToken)
     {
-        var buffer = new List<Tick>();
         try
         {
-            await foreach (var tick in _input.Reader.ReadAllAsync(hostToken))
-                buffer.Add(tick);
+            while (true)
+            {
+                await Task.Delay(50, hostToken); // один токен и на ожидание, и на запись
+
+                Tick[] batch;
+                lock (_gate)
+                {
+                    if (_buffer.Count == 0)
+                        continue;
+                    batch = _buffer.ToArray();
+                    _buffer.Clear();
+                }
+
+                await sink.WriteBatchAsync(batch, hostToken);
+            }
         }
         catch (OperationCanceledException)
         {
-            // hostToken отменён → цикл чтения оборван, buffer НЕ дописан = потеря данных.
-            return;
+            // hostToken отменён на ожидании или записи → накопленный буфер потерян, не дописан.
         }
-
-        // сюда попадаем только при штатном завершении канала (которого при отмене не будет)
-        if (buffer.Count > 0)
-            await sink.WriteBatchAsync(buffer.ToArray(), CancellationToken.None);
     }
 }

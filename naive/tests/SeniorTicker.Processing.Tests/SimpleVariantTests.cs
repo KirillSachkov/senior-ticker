@@ -80,12 +80,12 @@ public class SimpleVariantTests
 
         var run = processor.RunAsync(cts.Token);
         for (var i = 0; i < 100; i++)
-            await processor.Input.WriteAsync(TickFactory.New("BTC", i));
+            processor.Add(TickFactory.New("BTC", i)); // накопили в буфер до флаша
 
-        await cts.CancelAsync();        // штатная остановка одним общим токеном
+        await cts.CancelAsync();        // штатная остановка одним общим токеном — до первого флаша
         await run;
 
-        // КРАСНОЕ: один токен оборвал цикл чтения, buffer не дописан → всё потеряно.
+        // КРАСНОЕ: один токен оборвал и ожидание, и запись — накопленный буфер не дописан, всё потеряно.
         Assert.Equal(100, sink.All.Count);
     }
 
