@@ -28,7 +28,7 @@ public class ComparativeDemoRunnerTests(DemoPostgresFixture fx)
 
         var snapshot = runner.Snapshot();
         Assert.Equal(DemoRunStates.Stopped, snapshot.State);
-        Assert.Equal(3, snapshot.Modes.Length); // naive + channels-symbol + channels-dedup-key
+        Assert.Equal(2, snapshot.Modes.Length); // naive + channels-dedup-key
         Assert.All(snapshot.Modes, mode =>
         {
             Assert.True(mode.Accepted > 0);

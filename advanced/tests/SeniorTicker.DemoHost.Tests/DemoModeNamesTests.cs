@@ -7,7 +7,6 @@ public class DemoModeNamesTests
     [Fact]
     public void Display_names_are_russian_for_demo_ui()
     {
-        Assert.Equal("Каналы: шардинг по символу", DemoMode.ChannelsSymbol.ToDisplayName());
-        Assert.Equal("Каналы: шардинг по ключу тика", DemoMode.ChannelsDedupKey.ToDisplayName());
+        Assert.Equal("Правильный: Channels + дедупликация по ключу тика", DemoMode.ChannelsDedupKey.ToDisplayName());
     }
 }

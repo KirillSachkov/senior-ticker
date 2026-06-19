@@ -5,7 +5,7 @@ using SeniorTicker.Domain;
 namespace SeniorTicker.Processing;
 
 /// <summary>
-/// Конвейер обработки в памяти: input → router(stableHash(Symbol)%P) → P шардов
+/// Конвейер обработки в памяти: input → router(stableHash(TickKey)%P) → P шардов
 /// (single-writer дедупликация + батч) → shared Channel&lt;Tick[]&gt; → K writer-воркеров → ITickSink.
 /// Все каналы BOUNDED (FullMode.Wait) → явный backpressure и ограниченная память.
 /// Двухфазный дренаж: Input.Complete() → router завершает шарды → шарды флашат остаток →
@@ -43,7 +43,7 @@ public sealed class TickPipeline
         _sink = sink;
         _metrics = metrics;
         _time = time;
-        _partitioner = partitioner ?? new SymbolShardPartitioner();
+        _partitioner = partitioner ?? new DedupKeyShardPartitioner();
 
         _ingest = Channel.CreateBounded<Tick>(new BoundedChannelOptions(options.IngestCapacity)
         {

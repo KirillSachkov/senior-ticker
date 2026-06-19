@@ -396,10 +396,8 @@ function shortNumber(value: number) {
 
 function modeCaption(mode: string) {
   switch (mode) {
-    case "channels-symbol":
-      return "Каналы: ключ = символ";
     case "channels-dedup-key":
-      return "Каналы: ключ = ключ тика";
+      return "Правильный: ключ тика";
     default:
       return mode;
   }

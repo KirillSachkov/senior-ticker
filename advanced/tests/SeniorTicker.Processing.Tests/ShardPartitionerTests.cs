@@ -5,20 +5,6 @@ namespace SeniorTicker.Processing.Tests;
 public class ShardPartitionerTests
 {
     [Fact]
-    public void Symbol_partitioner_routes_one_hot_symbol_to_one_shard()
-    {
-        var partitioner = new SymbolShardPartitioner();
-        const int shardCount = 8;
-
-        var shards = Enumerable.Range(0, 10_000)
-            .Select(i => partitioner.GetShard(TickFactory.New("BTCUSDT", i), shardCount))
-            .Distinct()
-            .ToArray();
-
-        Assert.Single(shards);
-    }
-
-    [Fact]
     public void Dedup_key_partitioner_spreads_one_hot_symbol_across_shards()
     {
         var partitioner = new DedupKeyShardPartitioner();

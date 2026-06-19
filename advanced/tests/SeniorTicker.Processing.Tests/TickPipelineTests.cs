@@ -64,9 +64,11 @@ public class TickPipelineTests
     }
 
     [Fact]
-    public async Task Same_symbol_always_routes_to_one_shard_preserving_dedup()
+    public async Task Same_tick_key_routes_to_one_shard_preserving_dedup()
     {
-        // Дубликаты одного символа должны попасть в ОДИН шард → дедупликация остаётся локальной.
+        // Роутинг по умолчанию идёт по ключу тика (TickKey). Дубликаты с ОДНИМ ключом
+        // обязаны сойтись в один шард → дедупликация остаётся локальной для single-writer шарда.
+        // (Горячий символ с РАЗНЫМИ ключами тика при этом вправе размазаться по шардам.)
         var sink = new InMemoryTickSink();
         var metrics = new CountingMetricsSink();
         var time = new FakeTimeProvider();
@@ -74,7 +76,7 @@ public class TickPipelineTests
 
         var run = pipeline.RunAsync(CancellationToken.None);
         for (var i = 0; i < 10; i++)
-            await pipeline.Input.WriteAsync(TickFactory.New("BTCUSDT", sourceId: 1)); // все дубликаты
+            await pipeline.Input.WriteAsync(TickFactory.New("BTCUSDT", sourceId: 1)); // один ключ тика, все дубликаты
 
         pipeline.Input.Complete();
         await run.WaitAsync(TimeSpan.FromSeconds(10));
@@ -182,8 +184,8 @@ public class TickPipelineTests
     [Fact]
     public async Task High_parallel_producer_load_no_lost_or_duplicate_writes()
     {
-        // Много продюсеров параллельно шлют пересекающиеся ключи; роутинг по символу
-        // гарантирует, что дубликаты сходятся в один шард → дедупликация корректна без локов.
+        // Много продюсеров параллельно шлют пересекающиеся ключи; роутинг по ключу тика
+        // гарантирует, что дубликаты одного ключа сходятся в один шард → дедупликация корректна без локов.
         var sink = new InMemoryTickSink();
         var metrics = new CountingMetricsSink();
         var time = new FakeTimeProvider();

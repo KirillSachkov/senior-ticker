@@ -24,7 +24,6 @@ public sealed class ComparativeDemoRunner
         _modes =
         [
             new NaiveDemoModeRunner(DemoMode.Naive, dataSource),
-            new DemoModeRunner(DemoMode.ChannelsSymbol, dataSource, new SymbolShardPartitioner()),
             new DemoModeRunner(DemoMode.ChannelsDedupKey, dataSource, new DedupKeyShardPartitioner()),
         ];
     }
