@@ -4,7 +4,7 @@ using SeniorTicker.Processing;
 
 namespace SeniorTicker.DemoHost.Demo;
 
-public sealed class DemoModeRunner
+public sealed class DemoModeRunner : IDemoModeRunner
 {
     private static readonly string[] ColdSymbols = ["ETHUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT", "DOGEUSDT"];
 

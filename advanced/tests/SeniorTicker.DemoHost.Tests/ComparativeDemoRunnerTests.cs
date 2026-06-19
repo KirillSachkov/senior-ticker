@@ -7,7 +7,7 @@ namespace SeniorTicker.DemoHost.Tests;
 public class ComparativeDemoRunnerTests(DemoPostgresFixture fx)
 {
     [Fact]
-    public async Task Starts_both_modes_and_writes_to_real_postgres()
+    public async Task Starts_all_modes_and_writes_to_real_postgres()
     {
         var db = new DemoDatabase(fx.DataSource);
         var runner = new ComparativeDemoRunner(db, fx.DataSource);
@@ -28,7 +28,7 @@ public class ComparativeDemoRunnerTests(DemoPostgresFixture fx)
 
         var snapshot = runner.Snapshot();
         Assert.Equal(DemoRunStates.Stopped, snapshot.State);
-        Assert.Equal(2, snapshot.Modes.Length);
+        Assert.Equal(3, snapshot.Modes.Length); // naive + channels-symbol + channels-dedup-key
         Assert.All(snapshot.Modes, mode =>
         {
             Assert.True(mode.Accepted > 0);
@@ -89,13 +89,18 @@ public class ComparativeDemoRunnerTests(DemoPostgresFixture fx)
 
         var snapshot = runner.Snapshot();
         Assert.Equal(DemoRunStates.Stopped, snapshot.State);
-        Assert.All(snapshot.Modes, mode =>
+        // Боевые (channels) режимы дренажируют чисто: всё принятое доходит до записи.
+        var channels = snapshot.Modes.Where(m => m.Mode != "naive").ToArray();
+        Assert.All(channels, mode =>
         {
             Assert.Equal(mode.Accepted, mode.Received);
             Assert.Equal(mode.Accepted - mode.Deduplicated, mode.Written);
             Assert.Equal(mode.Written, mode.DbRows);
             Assert.Empty(mode.ShardDepths);
         });
+        // Наивный режим под нагрузкой НЕ успевает: запись по тику отстаёт, бэклог теряется на остановке.
+        var naive = snapshot.Modes.Single(m => m.Mode == "naive");
+        Assert.True(naive.Received < naive.Accepted, "naive must fall behind under load");
     }
 
     [Fact]

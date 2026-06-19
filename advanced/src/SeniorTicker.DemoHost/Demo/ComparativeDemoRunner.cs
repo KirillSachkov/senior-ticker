@@ -7,7 +7,7 @@ namespace SeniorTicker.DemoHost.Demo;
 public sealed class ComparativeDemoRunner
 {
     private readonly DemoDatabase _database;
-    private readonly DemoModeRunner[] _modes;
+    private readonly IDemoModeRunner[] _modes;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly ILogger<ComparativeDemoRunner>? _log;
     private DemoConfig _config = new();
@@ -23,8 +23,9 @@ public sealed class ComparativeDemoRunner
         _log = log;
         _modes =
         [
-            new(DemoMode.ChannelsSymbol, dataSource, new SymbolShardPartitioner()),
-            new(DemoMode.ChannelsDedupKey, dataSource, new DedupKeyShardPartitioner()),
+            new NaiveDemoModeRunner(DemoMode.Naive, dataSource),
+            new DemoModeRunner(DemoMode.ChannelsSymbol, dataSource, new SymbolShardPartitioner()),
+            new DemoModeRunner(DemoMode.ChannelsDedupKey, dataSource, new DedupKeyShardPartitioner()),
         ];
     }
 
