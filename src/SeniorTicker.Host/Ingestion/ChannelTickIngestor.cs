@@ -9,7 +9,7 @@ namespace SeniorTicker.Host.Ingestion;
 /// отставании БД коннектор реже читает сокет (а не копит в RAM). Связывает Infra.WebSockets и
 /// Processing, не создавая прямой ссылки между ними (оба знают только порт <see cref="ITickIngestor"/>).
 /// </summary>
-public sealed class ChannelTickIngestor(TickPipeline pipeline) : ITickIngestor
+public sealed class ChannelTickIngestor(ITickPipeline pipeline) : ITickIngestor
 {
     public ValueTask IngestAsync(Tick tick, CancellationToken ct) => pipeline.Input.WriteAsync(tick, ct);
 }

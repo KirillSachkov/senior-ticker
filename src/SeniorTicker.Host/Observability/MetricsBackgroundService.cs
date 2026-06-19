@@ -14,7 +14,7 @@ namespace SeniorTicker.Host.Observability;
 /// </summary>
 public sealed class MetricsBackgroundService(
     MetricsSink metrics,
-    TickPipeline pipeline,
+    ITickPipeline pipeline,
     MetricsConfig config,
     TimeProvider time,
     ILogger<MetricsBackgroundService> logger) : BackgroundService

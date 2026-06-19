@@ -11,7 +11,7 @@ namespace SeniorTicker.Processing;
 /// Двухфазный дренаж: Input.Complete() → router завершает шарды → шарды флашат остаток →
 /// батч-канал завершается → writers дописывают → RunAsync возвращается. Отмена ct = abort.
 /// </summary>
-public sealed class TickPipeline
+public sealed class TickPipeline : ITickPipeline
 {
     private readonly PipelineOptions _opt;
     private readonly ITickSink _sink;

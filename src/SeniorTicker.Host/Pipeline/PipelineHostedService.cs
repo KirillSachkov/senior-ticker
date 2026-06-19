@@ -15,7 +15,7 @@ namespace SeniorTicker.Host.Pipeline;
 /// он ре-сёрфейсится РОВНО один раз для ненулевого exit (см. явные ветки ниже).
 /// </summary>
 public sealed class PipelineHostedService(
-    TickPipeline pipeline,
+    ITickPipeline pipeline,
     ShutdownConfig shutdown,
     IHostApplicationLifetime lifetime,
     TimeProvider time,
