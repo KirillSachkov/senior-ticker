@@ -1,15 +1,14 @@
 using System.Net.WebSockets;
 using Microsoft.Extensions.Logging;
-using Polly;
 using SeniorTicker.Application;
-using SeniorTicker.Domain;
 
 namespace SeniorTicker.Infrastructure.WebSockets;
 
 /// <summary>
-/// Базовый коннектор: connect → receive (растущий буфер) → parse → validate → ingest, с
-/// автопереподключением через Polly. Чисто async (ни одного заблокированного потока). Логирует
-/// connect/disconnect/error. Конкретный коннектор задаёт лишь IMessageParser (формат биржи).
+/// Наивный коннектор: connect → один ReceiveAsync в фиксированный буфер → parse → ingest, reconnect
+/// простым циклом с паузой. Слабее advanced: буфер фиксированный (длинное сообщение усекается), кадр
+/// читается без сборки до EndOfMessage, нет таймаутов connect/idle (молчащий peer завесит цикл), нет
+/// валидации тика, reconnect повторяет на любую ошибку. Парсер задаёт формат биржи.
 /// </summary>
 public sealed class WebSocketConnectorBase(
     WebSocketConnectorOptions options,
@@ -20,89 +19,55 @@ public sealed class WebSocketConnectorBase(
     ILogger logger,
     Func<ClientWebSocket> socketFactory) : IExchangeConnector
 {
+    private const int BufferBytes = 16 * 1024; // фиксированный буфер; длинное сообщение не вместится
+
     public string Name => options.Name;
 
     public async Task RunAsync(CancellationToken ct)
     {
-        var pipeline = ResiliencePipelineFactory.CreateReconnectPipeline(options, (ex, delay, attempt) =>
-            logger.LogWarning(ex, "{Name}: reconnect attempt {Attempt} in {Delay}", Name, attempt + 1, delay));
-        try
+        while (!ct.IsCancellationRequested)
         {
-            await pipeline.ExecuteAsync(async token => await ConnectAndConsumeAsync(token), ct)
-                ;
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            logger.LogInformation("{Name}: stopped (shutdown)", Name);
+            try
+            {
+                await ConnectAndConsumeAsync(ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                return; // штатная остановка
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "{Name}: соединение оборвалось, переподключение через 1с", Name);
+                try { await Task.Delay(1000, ct); } catch (OperationCanceledException) { return; }
+            }
         }
     }
 
     private async Task ConnectAndConsumeAsync(CancellationToken ct)
     {
         using var socket = socketFactory();
-        await ConnectWithTimeoutAsync(socket, ct);
+        await socket.ConnectAsync(options.Url, ct); // без таймаута: зависший connect ждёт бесконечно
         logger.LogInformation("{Name}: connected to {Url}", Name, options.Url);
 
-        var receiver = new WebSocketMessageReceiver(options.InitialReceiveBufferBytes, options.MaxMessageBytes);
+        var buffer = new byte[BufferBytes];
         while (!ct.IsCancellationRequested)
         {
-            using var msg = await ReceiveWithIdleTimeoutAsync(receiver, socket, ct);
-            if (msg.IsClosed)
+            var result = await socket.ReceiveAsync(buffer.AsMemory(), ct); // без idle-таймаута
+            if (result.MessageType == WebSocketMessageType.Close)
             {
-                logger.LogInformation("{Name}: server closed connection — reconnecting", Name);
-                throw new WebSocketException(WebSocketError.ConnectionClosedPrematurely); // → Polly reconnect
+                logger.LogInformation("{Name}: server closed connection", Name);
+                return; // наружу — reconnect
             }
 
-            // No-throw гейт уровня конвейера: НИ ОДИН парсер не должен уронить receive-loop недоверенным
-            // кадром (иначе тривиальный DoS под int.MaxValue reconnect). Дополняет внутренние catch парсеров —
-            // даже будущий парсер с неполным catch-списком тут безопасно деградирует в drop+метрику.
-            bool parsed;
-            Tick tick = default;
-            try
-            {
-                parsed = parser.TryParse(msg.Span, time.GetUtcNow(), out tick);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            // один кадр как есть: фрагмент или сообщение длиннее буфера усекается
+            var span = buffer.AsSpan(0, result.Count);
+            if (!parser.TryParse(span, time.GetUtcNow(), out var tick))
             {
                 metrics.OnDropped();
-                logger.LogWarning(ex, "{Name}: parser threw on a frame — dropped", Name);
                 continue;
             }
 
-            if (!parsed) { metrics.OnDropped(); continue; }
-            if (!TickValidator.IsValid(tick, time)) { metrics.OnDropped(); continue; }
-            await ingestor.IngestAsync(tick, ct);
-        }
-    }
-
-    /// <summary>ConnectAsync с дедлайном (WS-2). Таймаут → TimeoutException (не shutdown-OCE) → Polly reconnect.</summary>
-    private async Task ConnectWithTimeoutAsync(ClientWebSocket socket, CancellationToken ct)
-    {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(options.ConnectTimeout);
-        try
-        {
-            await socket.ConnectAsync(options.Url, cts.Token);
-        }
-        catch (OperationCanceledException) when (cts.IsCancellationRequested && !ct.IsCancellationRequested)
-        {
-            throw new TimeoutException($"{Name}: WS connect to {options.Url} exceeded {options.ConnectTimeout}");
-        }
-    }
-
-    /// <summary>ReceiveAsync с idle-дедлайном (WS-1, анти-slowloris). Тишина дольше idle → reconnect.</summary>
-    private async ValueTask<ReceivedMessage> ReceiveWithIdleTimeoutAsync(
-        WebSocketMessageReceiver receiver, ClientWebSocket socket, CancellationToken ct)
-    {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(options.ReceiveIdleTimeout);
-        try
-        {
-            return await receiver.ReceiveAsync(socket, cts.Token);
-        }
-        catch (OperationCanceledException) when (cts.IsCancellationRequested && !ct.IsCancellationRequested)
-        {
-            throw new TimeoutException($"{Name}: no WS data within idle timeout {options.ReceiveIdleTimeout}");
+            await ingestor.IngestAsync(tick, ct); // без валидации тика — принимаем что распарсилось
         }
     }
 }
