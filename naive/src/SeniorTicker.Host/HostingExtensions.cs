@@ -72,14 +72,8 @@ public static class HostingExtensions
         builder.Services.AddSingleton<MetricsSink>();
         builder.Services.AddSingleton<IMetricsSink>(sp => sp.GetRequiredService<MetricsSink>());
 
-        // Конвейер: боевой TickPipeline или учебный NaivePipeline (Pipeline:Mode=Naive) — оба через ITickPipeline.
-        var naivePipeline = string.Equals(
-            builder.Configuration.GetValue<string>("Pipeline:Mode"), "Naive", StringComparison.OrdinalIgnoreCase);
-        if (naivePipeline)
-            builder.Services.AddSingleton<ITickPipeline>(sp =>
-                new NaivePipeline(sp.GetRequiredService<ITickSink>(), sp.GetRequiredService<IMetricsSink>()));
-        else
-            builder.Services.AddSingleton<ITickPipeline, TickPipeline>();
+        // Наивный конвейер (антипример): общий дедуп, запись по тику, безлимитный вход.
+        builder.Services.AddSingleton<ITickPipeline, NaivePipeline>();
         builder.Services.AddSingleton<ITickIngestor, ChannelTickIngestor>();
         builder.Services.AddSingleton<ConnectorFactory>();
 
@@ -107,10 +101,6 @@ public static class HostingExtensions
             ConnectionString = connectionString,
             MaxWriterConnections = maxWriters,
         });
-
-        // Naive-режим: подменяем боевой COPY-sink на общий DbContext + SaveChanges-на-тик (антипример записи).
-        if (naivePipeline)
-            builder.Services.AddSingleton<ITickSink, NaiveDbContextSink>();
 
         // Хостед-сервисы — ПОРЯДОК = хореография §5.4 (старт сверху-вниз, останов снизу-вверх).
         builder.Services.AddHostedService<DatabaseInitializerHostedService>();   // (1) миграции до writers (#10)

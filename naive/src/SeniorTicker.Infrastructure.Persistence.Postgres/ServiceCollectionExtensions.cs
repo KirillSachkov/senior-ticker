@@ -9,7 +9,7 @@ public static class ServiceCollectionExtensions
 {
     /// <summary>
     /// Регистрирует: NpgsqlDataSource (singleton, потокобезопасный пул) для горячей записи COPY;
-    /// IDbContextFactory (схема/чтения); ITickSink → CopyTickSink; DatabaseInitializer.
+    /// IDbContextFactory (схема/чтения); ITickSink → NaiveDbContextSink; DatabaseInitializer.
     /// </summary>
     public static IServiceCollection AddPostgresPersistence(this IServiceCollection services, PostgresOptions options)
     {
@@ -26,7 +26,7 @@ public static class ServiceCollectionExtensions
         services.AddDbContextFactory<TickDbContext>((sp, o) => o.UseNpgsql(sp.GetRequiredService<NpgsqlDataSource>()));
         services.AddSingleton(options);
         services.AddSingleton<DatabaseInitializer>();
-        services.AddSingleton<ITickSink, CopyTickSink>();
+        services.AddSingleton<ITickSink, NaiveDbContextSink>();
         return services;
     }
 }
