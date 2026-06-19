@@ -6,7 +6,7 @@ namespace SeniorTicker.Processing;
 
 /// <summary>
 /// Конвейер обработки в памяти: input → router(stableHash(Symbol)%P) → P шардов
-/// (single-writer дедуп + батч) → shared Channel&lt;Tick[]&gt; → K writer-воркеров → ITickSink.
+/// (single-writer дедупликация + батч) → shared Channel&lt;Tick[]&gt; → K writer-воркеров → ITickSink.
 /// Все каналы BOUNDED (FullMode.Wait) → явный backpressure и ограниченная память.
 /// Двухфазный дренаж: Input.Complete() → router завершает шарды → шарды флашат остаток →
 /// батч-канал завершается → writers дописывают → RunAsync возвращается. Отмена ct = abort.
@@ -58,7 +58,7 @@ public sealed class TickPipeline
             _shards[i] = Channel.CreateBounded<Tick>(new BoundedChannelOptions(options.ShardCapacity)
             {
                 FullMode = BoundedChannelFullMode.Wait,
-                SingleReader = true,   // один ShardWorker = один поток-потребитель (инвариант дедупа)
+                SingleReader = true,   // один ShardWorker = один поток-потребитель (инвариант дедупликации)
                 SingleWriter = true,   // один router пишет в шард
             });
         }
@@ -74,7 +74,7 @@ public sealed class TickPipeline
     /// <summary>Точка входа для продюсеров (коннекторов). Backpressure #1.</summary>
     public ChannelWriter<Tick> Input => _ingest.Writer;
 
-    /// <summary>Глубина входного канала (для метрик §12: полный → лимитер дедуп/батч).</summary>
+    /// <summary>Глубина входного канала (для метрик §12: полный → лимитер дедупликации/батча).</summary>
     public int IngestDepth => _ingest.Reader.Count;
 
     /// <summary>Глубина батч-канала (для метрик §12: полный → лимитер БД).</summary>

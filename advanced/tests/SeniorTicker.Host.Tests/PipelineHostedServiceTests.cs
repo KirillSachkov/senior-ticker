@@ -50,7 +50,7 @@ public class PipelineHostedServiceTests
 
         await svc.StartAsync(CancellationToken.None);
         for (long i = 1; i <= 50; i++)
-            await pipeline.Input.WriteAsync(Tick(i));        // уникальные SourceId → дедуп не отбрасывает
+            await pipeline.Input.WriteAsync(Tick(i));        // уникальные SourceId → дедупликация не отбрасывает
         await svc.StopAsync(CancellationToken.None);
 
         Assert.Equal(50, sink.Total);

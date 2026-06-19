@@ -6,7 +6,7 @@ using SeniorTicker.Domain;
 namespace SeniorTicker.DemoHost.Demo;
 
 /// <summary>
-/// Демо-режим «наивный вариант»: без шардов, общий дедуп и запись ПО ТИКУ (без батчей, без
+/// Демо-режим «наивный вариант»: без шардов, общая дедупликация и запись ПО ТИКУ (без батчей, без
 /// backpressure). Под нагрузкой видно проблему: запись не успевает за приёмом — Written отстаёт
 /// от Accepted, очередь (IngestDepth) растёт без границы. Контраст к шардированным каналам с
 /// батч-записью. Самодостаточен — не зависит от боевого Processing.
@@ -26,7 +26,7 @@ public sealed class NaiveDemoModeRunner(DemoMode mode, NpgsqlDataSource dataSour
     private long _accepted;
     private long _lastUniqueKey = -1;
 
-    // НАИВНЫЙ общий дедуп: словарь + кольцо вытеснения, без локов; 32-битный ключ теряет SourceId.
+    // НАИВНАЯ общая дедупликация: словарь + кольцо вытеснения, без локов; 32-битный ключ теряет SourceId.
     private ConcurrentDictionary<int, byte> _seen = new();
     private int[] _ring = [];
     private int _ringIndex = -1;

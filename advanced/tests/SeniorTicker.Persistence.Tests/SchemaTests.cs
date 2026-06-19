@@ -17,7 +17,7 @@ public class SchemaTests(PostgresFixture fx)
             "SELECT to_regclass('public.ticks')::text", conn))
             Assert.Equal("ticks", await cmd.ExecuteScalarAsync() as string);
 
-        // unique index по ключу дедупа существует
+        // unique index по ключу дедупликации существует
         await using (var cmd = new NpgsqlCommand(
             "SELECT 1 FROM pg_indexes WHERE tablename='ticks' AND indexname='ux_ticks_dedup_key'", conn))
             Assert.Equal(1, await cmd.ExecuteScalarAsync());

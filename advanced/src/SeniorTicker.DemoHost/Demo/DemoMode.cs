@@ -19,7 +19,7 @@ public static class DemoModeNames
 
     public static string ToDisplayName(this DemoMode mode) => mode switch
     {
-        DemoMode.Naive => "Наивный: общий дедуп, запись по тику",
+        DemoMode.Naive => "Наивный: общая дедупликация, запись по тику",
         DemoMode.ChannelsSymbol => "Каналы: шардинг по символу",
         DemoMode.ChannelsDedupKey => "Каналы: шардинг по ключу тика",
         _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null),

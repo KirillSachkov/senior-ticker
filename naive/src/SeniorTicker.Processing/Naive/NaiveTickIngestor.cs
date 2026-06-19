@@ -4,9 +4,9 @@ using SeniorTicker.Domain;
 namespace SeniorTicker.Processing.Naive;
 
 /// <summary>
-/// Наивная обработка: тик обрабатывается на потоке коннектора — проверка по общему дедупу и запись
+/// Наивная обработка: тик обрабатывается на потоке коннектора — проверка по общей дедупликации и запись
 /// по одному тику. Без очереди, backpressure и шардов: под нагрузкой запись блокирует поток приёма,
-/// а общий дедуп гоняется между коннекторами. В advanced это разносят Channels и батчи.
+/// а общая дедупликация гоняется между коннекторами. В advanced это разносят Channels и батчи.
 /// </summary>
 public sealed class NaiveTickIngestor(IDeduplicator dedup, ITickSink sink, IMetricsSink metrics) : ITickIngestor
 {

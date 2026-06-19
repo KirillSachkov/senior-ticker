@@ -21,7 +21,7 @@ public sealed class TickDbContext(DbContextOptions<TickDbContext> options) : DbC
         e.Property(x => x.SourceId).HasColumnName("source_id");
         e.Property(x => x.IngestTimestamp).HasColumnName("ingest_ts");
 
-        // UNIQUE backstop по точному составному ключу дедупа (фикс класса #2 на уровне БД)
+        // UNIQUE backstop по точному составному ключу дедупликации (фикс класса #2 на уровне БД)
         e.HasIndex(x => new { x.Exchange, x.Symbol, x.ExchangeTimestamp, x.SourceId })
             .IsUnique()
             .HasDatabaseName("ux_ticks_dedup_key");

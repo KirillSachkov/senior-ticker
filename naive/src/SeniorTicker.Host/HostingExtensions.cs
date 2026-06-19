@@ -71,7 +71,7 @@ public static class HostingExtensions
         builder.Services.AddSingleton<MetricsSink>();
         builder.Services.AddSingleton<IMetricsSink>(sp => sp.GetRequiredService<MetricsSink>());
 
-        // Наивный вариант «в лоб»: обработка прямо на потоке коннектора — общий дедуп + запись по тику.
+        // Наивный вариант «в лоб»: обработка прямо на потоке коннектора — общая дедупликация + запись по тику.
         builder.Services.AddSingleton<IDeduplicator, NaiveDeduplicator>(); // ОБЩИЙ на все коннекторы — отсюда гонка
         builder.Services.AddSingleton<ITickIngestor, NaiveTickIngestor>();
         builder.Services.AddSingleton<ConnectorFactory>();

@@ -66,7 +66,7 @@ public class TickPipelineTests
     [Fact]
     public async Task Same_symbol_always_routes_to_one_shard_preserving_dedup()
     {
-        // Дубликаты одного символа должны попасть в ОДИН шард → дедуп остаётся локальным.
+        // Дубликаты одного символа должны попасть в ОДИН шард → дедупликация остаётся локальной.
         var sink = new InMemoryTickSink();
         var metrics = new CountingMetricsSink();
         var time = new FakeTimeProvider();
@@ -183,7 +183,7 @@ public class TickPipelineTests
     public async Task High_parallel_producer_load_no_lost_or_duplicate_writes()
     {
         // Много продюсеров параллельно шлют пересекающиеся ключи; роутинг по символу
-        // гарантирует, что дубликаты сходятся в один шард → дедуп корректен без локов.
+        // гарантирует, что дубликаты сходятся в один шард → дедупликация корректна без локов.
         var sink = new InMemoryTickSink();
         var metrics = new CountingMetricsSink();
         var time = new FakeTimeProvider();

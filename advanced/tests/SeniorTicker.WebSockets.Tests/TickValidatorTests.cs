@@ -40,7 +40,7 @@ public class TickValidatorTests
     public void Accepts_large_but_in_range_value()
         => Assert.True(TickValidator.IsValid(Make(price: TickValidator.MaxValue, volume: TickValidator.MaxValue), Time()));
 
-    // SEC-3: символ не должен отравлять окно дедупа/шард-роутинг — ограничиваем длину и charset.
+    // SEC-3: символ не должен отравлять окно дедупликации/шард-роутинг — ограничиваем длину и charset.
     [Fact]
     public void Rejects_overlong_symbol()
         => Assert.False(TickValidator.IsValid(Make(symbol: new string('A', TickValidator.MaxSymbolLength + 1)), Time()));

@@ -7,9 +7,9 @@ namespace SeniorTicker.Processing.Tests;
 
 /// <summary>
 /// КРАСНЫЕ ПО ЗАМЫСЛУ. Прогоняют «простой вариант» (Naive*) через те же инварианты, что держит
-/// боевой конвейер, и показывают, что он их НЕ держит: коллизия/гонка общего дедупа, потеря данных
+/// боевой конвейер, и показывают, что он их НЕ держит: коллизия/гонка общей дедупликации, потеря данных
 /// при записи из многих потоков, потеря буфера при остановке одним токеном. Красный тест здесь —
-/// это урок: почему дедуп нуждается в одном владельце, запись — в батчах и соединении-на-воркер,
+/// это урок: почему дедупликация нуждается в одном владельце, запись — в батчах и соединении-на-воркер,
 /// а остановка — в двухфазном дренаже. Зелёный контраст — в TickPipelineTests и TenProblemsRegressionTests.
 /// (CI нет, это учебный проект — тесты остаются красными намеренно.)
 /// </summary>
@@ -33,7 +33,7 @@ public class SimpleVariantTests
     {
         // Инвариант: 1000 уникальных ключей → 1000 записей (ср. High_parallel_producer_load в TickPipelineTests).
         var sink = new InMemoryTickSink();
-        var processor = new NaiveTickIngestor(new NaiveDeduplicator(), sink, new CountingMetricsSink()); // ОДИН общий дедуп
+        var processor = new NaiveTickIngestor(new NaiveDeduplicator(), sink, new CountingMetricsSink()); // ОДНА общая дедупликация
 
         const int producers = 16, perProducer = 500, uniqueKeys = 1000;
         var tasks = Enumerable.Range(0, producers).Select(p => Task.Run(async () =>
@@ -46,7 +46,7 @@ public class SimpleVariantTests
         })).ToArray();
         await Task.WhenAll(tasks);
 
-        // КРАСНОЕ: ключ игнорирует SourceId, а общий дедуп гоняется потоками → записей далеко не 1000.
+        // КРАСНОЕ: ключ игнорирует SourceId, а общая дедупликация гоняется потоками → записей далеко не 1000.
         Assert.Equal(uniqueKeys, sink.All.Count);
         Assert.Equal(uniqueKeys, sink.All.Select(t => t.Key).Distinct().Count());
     }

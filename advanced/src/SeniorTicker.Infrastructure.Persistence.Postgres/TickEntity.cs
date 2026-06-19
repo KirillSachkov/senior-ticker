@@ -8,7 +8,7 @@ namespace SeniorTicker.Infrastructure.Persistence.Postgres;
 /// </summary>
 public sealed class TickEntity
 {
-    public long Id { get; set; }                 // bigint identity (суррогат для удобства, не ключ дедупа)
+    public long Id { get; set; }                 // bigint identity (суррогат для удобства, не ключ дедупликации)
     public Exchange Exchange { get; set; }
     public string Symbol { get; set; } = string.Empty;
     public decimal Price { get; set; }

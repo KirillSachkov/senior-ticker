@@ -4,7 +4,7 @@ namespace SeniorTicker.Infrastructure.WebSockets;
 
 /// <summary>
 /// Гейт значений недоверенного фида (§11). decimal исключает NaN/Infinity по типу; проверяем
-/// диапазон цены/объёма (нижняя И верхняя границы), окно времени (защищает окно дедупа и BRIN-индекс
+/// диапазон цены/объёма (нижняя И верхняя границы), окно времени (защищает окно дедупликации и BRIN-индекс
 /// по времени от абсурдных меток) и символ.
 /// </summary>
 public static class TickValidator
@@ -18,9 +18,9 @@ public static class TickValidator
     /// на порядки выше любой реальной цены/объёма и на 2 порядка ниже предела колонки.</summary>
     public const decimal MaxValue = 1_000_000_000_000_000_000m; // 10^18
 
-    /// <summary>Верхняя граница длины тикера. Защищает память окна дедупа и стоимость FNV-шардинга:
+    /// <summary>Верхняя граница длины тикера. Защищает память окна дедупликации и стоимость FNV-шардинга:
     /// без неё враждебный фид мог бы прислать символ до MaxMessageBytes, который попадёт в TickKey
-    /// и осядет ключом в HashSet окна дедупа на всё окно.</summary>
+    /// и осядет ключом в HashSet окна дедупликации на всё окно.</summary>
     public const int MaxSymbolLength = 32;
 
     public static bool IsValid(in Tick tick, TimeProvider time)
@@ -36,7 +36,7 @@ public static class TickValidator
     }
 
     // Whitelist: латиница/цифры + разделители реальных тикеров (BTCUSDT, BTC/USD, XBT-USD, BTC_USD, BTC.D).
-    // Отвергает мусор/мохибейк/гигантские метки до того, как они отравят окно дедупа и BRIN-индекс по времени.
+    // Отвергает мусор/мохибейк/гигантские метки до того, как они отравят окно дедупликации и BRIN-индекс по времени.
     private static bool IsValidSymbol(string symbol)
     {
         if (string.IsNullOrEmpty(symbol) || symbol.Length > MaxSymbolLength) return false;
