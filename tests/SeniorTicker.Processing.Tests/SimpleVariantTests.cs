@@ -97,17 +97,31 @@ public class SimpleVariantTests
         public bool IsDuplicate(in Tick tick) => false;
     }
 
-    /// <summary>Общий НЕ-потокобезопасный список — модель одного общего DbContext/соединения.</summary>
+    /// <summary>Модель одного общего DbContext: повторный параллельный вход недопустим и бросает,
+    /// как EF («A second operation was started…»). Делает провал детерминированным, без флака.</summary>
     private sealed class NaiveSharedListSink : ITickSink
     {
         private readonly List<Tick> _all = [];
+        private int _inUse;
         public int Count => _all.Count;
 
-        public Task WriteBatchAsync(ReadOnlyMemory<Tick> batch, CancellationToken ct)
+        public async Task WriteBatchAsync(ReadOnlyMemory<Tick> batch, CancellationToken ct)
         {
-            foreach (var t in batch.Span)
-                _all.Add(t); // НЕ потокобезопасно: гонка на внутреннем массиве/счётчике
-            return Task.CompletedTask;
+            if (Interlocked.Exchange(ref _inUse, 1) == 1)
+                throw new InvalidOperationException(
+                    "A second operation was started on this context before a previous operation completed.");
+            try
+            {
+                for (var i = 0; i < batch.Length; i++)
+                {
+                    _all.Add(batch.Span[i]);
+                    await Task.Delay(1, ct).ConfigureAwait(false); // окно, чтобы параллельный вход поймал занятость
+                }
+            }
+            finally
+            {
+                _inUse = 0;
+            }
         }
     }
 }
