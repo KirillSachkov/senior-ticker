@@ -1,49 +1,40 @@
-# Варианты решения StreamTicker (карта для видео)
+# Два решения StreamTicker (для разбора в видео)
 
-Одна задача — четыре ступени, от наивной к проверяемой. В **коде** это две части: папка
-наивного антипримера и одно боевое решение, которое покрывает базовый и продвинутый режимы
-**конфигом** (`Pipeline:Mode`, `Pipeline:ShardCount`, выбор партиционера) — без форков.
+Решение продублировано на две папки — так удобно показывать код «по папкам».
+Общий нижний слой (Domain, Application, MockExchange, WebSockets) в обеих папках дублируется — это
+сознательно, для обучения. Корневые `Directory.Build.props` / `Directory.Packages.props` / `global.json`
+наследуются обеими (одни версии пакетов, без дублей конфигурации).
 
-## v0 — Наивный вариант (антипример)
+## `advanced/` — хорошее решение
 
-Общее состояние без владельца, запись по одному тику, остановка одним токеном, без очередей.
+Channels + шарды + binary COPY + двухфазная остановка. Запускается в режиме `Pipeline:Mode=Channels`
+(по умолчанию). Все тесты зелёные.
 
-- `src/SeniorTicker.Processing/Naive/NaiveDeduplicator.cs` — общий словарь + кольцо + индекс (гонка, коллизия, потеря SourceId)
-- `src/SeniorTicker.Processing/Naive/NaiveTickProcessor.cs` — обработка на потоке-приёмнике, запись по тику
-- `src/SeniorTicker.Processing/Naive/NaiveBufferingProcessor.cs` — остановка одним токеном (теряет буфер)
-- `src/SeniorTicker.Processing/Naive/NaivePipeline.cs` — то же целиком как `ITickPipeline` (для запуска через Host)
-- `src/SeniorTicker.Infrastructure.Persistence.Postgres/NaiveDbContextSink.cs` — общий `DbContext`, `SaveChanges` на тик
-- **Запуск:** `Pipeline:Mode=Naive`. **Падающие тесты-доказательства:** `tests/SeniorTicker.Processing.Tests/SimpleVariantTests.cs`
+- `advanced/SeniorTicker.sln`
+- Дедупликация (один владелец, без локов): `advanced/src/SeniorTicker.Processing/SlidingWindowDeduplicator.cs`
+- Конвейер: `advanced/src/SeniorTicker.Processing/TickPipeline.cs`
+- Запись (соединение-на-пачку + COPY): `advanced/src/SeniorTicker.Infrastructure.Persistence.Postgres/CopyTickSink.cs`
+- Двухфазная остановка: `advanced/src/SeniorTicker.Host/Pipeline/PipelineHostedService.cs`
+- Шардирование: `SymbolShardPartitioner.cs` (по `Symbol`) и `DedupKeyShardPartitioner.cs` (горячий тикер, по `TickKey`) — переключаются конфигом `Pipeline:ShardCount` / партиционером.
+- Демо сравнения режимов: `advanced/src/SeniorTicker.DemoHost/` + `frontend/senior-ticker-demo/`
 
-## v1 — Базовый: Channels, один шард
+## `naive/` — наивное решение (антипример)
 
-Корректно для нагрузки тестового: ограниченные очереди (backpressure), один владелец дедупа
-(без локов), батч + binary `COPY`, двухфазная остановка.
+Обработка на потоке-источнике, общий дедуп, запись по тику, остановка одним токеном, без очередей.
+Запускается в режиме `Pipeline:Mode=Naive` (по умолчанию в `naive/`). Демо-тесты намеренно красные.
 
-- `src/SeniorTicker.Processing/TickPipeline.cs` — конвейер (input → router → шард → батчи → writers)
-- `src/SeniorTicker.Processing/SlidingWindowDeduplicator.cs` — окно дедупа (single-writer, без локов)
-- `src/SeniorTicker.Infrastructure.Persistence.Postgres/CopyTickSink.cs` — соединение-на-пачку + binary COPY
-- `src/SeniorTicker.Host/Pipeline/PipelineHostedService.cs` — двухфазная остановка (Complete → дренаж)
-- **Запуск:** `Pipeline:Mode=Channels`, `Pipeline:ShardCount=1` (по умолчанию)
-
-## v2 — Шардирование по Symbol
-
-Тот же код, больше шардов: дедуп параллельный, но локальный (один владелец на инструмент).
-
-- `src/SeniorTicker.Processing/SymbolShardPartitioner.cs` + `src/SeniorTicker.Domain/StableHash.cs`
-- **Запуск:** `Pipeline:ShardCount=N` (партиционер по умолчанию — по `Symbol`)
-
-## v3 — Горячий тикер: шард по TickKey
-
-Когда один инструмент забивает поток и шардирование по `Symbol` не помогает. Тот же код, другой партиционер.
-
-- `src/SeniorTicker.Processing/DedupKeyShardPartitioner.cs`
-- Демо сравнения режимов под нагрузкой: `src/SeniorTicker.DemoHost/` + `frontend/senior-ticker-demo/`
+- `naive/SeniorTicker.Naive.sln`
+- Наивный дедуп (общий словарь + кольцо, 32-битный ключ): `naive/src/SeniorTicker.Processing/Naive/NaiveDeduplicator.cs`
+- Наивный конвейер (общий дедуп, запись по тику, безлимитный вход): `naive/src/SeniorTicker.Processing/Naive/NaivePipeline.cs`
+- Наивная остановка одним токеном (теряет буфер): `naive/src/SeniorTicker.Processing/Naive/NaiveBufferingProcessor.cs`
+- Наивная запись (общий `DbContext`, `SaveChanges` на тик): `naive/src/SeniorTicker.Infrastructure.Persistence.Postgres/NaiveDbContextSink.cs`
+- Падающие демо-тесты: `naive/tests/SeniorTicker.Processing.Tests/SimpleVariantTests.cs`
+  - `dotnet test naive/SeniorTicker.Naive.sln` → красные: 1000→20 (дедуп), коллапс SourceId, ArgumentException (запись), 100→0 (остановка).
 
 ## Лестница ↔ акты дека
 
-| Акт | Ступень | Главное |
-|-----|---------|---------|
-| 1 | v0 наивный | ломаем по шагам: дедуп, запись, остановка, «без очередей» |
-| 2 | v1 базовый | чиним по концепциям: очередь+backpressure, один владелец, батч+COPY, двухфазный стоп |
-| 3 | v2 / v3 | масштаб: шарды по Symbol, горячий тикер по TickKey + доказательство тестами |
+| Акт | Папка | Главное |
+|-----|-------|---------|
+| 1 | `naive/` | ломаем по шагам: дедупликация, запись, остановка, «без очередей» |
+| 2 | `advanced/` | чиним по концепциям: очередь+backpressure, один владелец, батч+COPY, двухфазная остановка |
+| 3 | `advanced/` | масштаб: шарды по `Symbol`, горячий тикер по `TickKey` + доказательство тестами |

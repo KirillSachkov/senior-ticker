@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\SeniorTicker.Application\SeniorTicker.Application.csproj" />
+    <ProjectReference Include="..\SeniorTicker.Domain\SeniorTicker.Domain.csproj" />
+    <ProjectReference Include="..\SeniorTicker.Processing\SeniorTicker.Processing.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+</Project>
