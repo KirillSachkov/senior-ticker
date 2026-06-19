@@ -5,10 +5,10 @@ using SeniorTicker.Domain;
 namespace SeniorTicker.Infrastructure.Persistence.Postgres;
 
 /// <summary>
-/// «Простой вариант» записи: ОДИН общий <see cref="TickDbContext"/> на весь сервис и <c>SaveChanges</c>
-/// на каждый тик. Антипример к <see cref="CopyTickSink"/> (соединение-на-пачку + binary COPY): под
-/// параллельной записью общий контекст бросает «A second operation was started on this context», а даже
-/// без гонок это запрос в БД на каждый тик. Включается тумблером <c>Pipeline:Mode=Naive</c>.
+/// Наивная запись: один общий <see cref="TickDbContext"/> на весь сервис и <c>SaveChanges</c> на каждый
+/// тик. Под параллельной записью общий контекст бросает «A second operation was started on this context»,
+/// и даже без гонок это запрос в БД на каждый тик. В advanced запись идёт через CopyTickSink:
+/// соединение на пачку и binary COPY.
 /// </summary>
 public sealed class NaiveDbContextSink(IDbContextFactory<TickDbContext> factory) : ITickSink, IDisposable
 {

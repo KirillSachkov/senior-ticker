@@ -1,25 +1,21 @@
+using System.Collections.Concurrent;
 using SeniorTicker.Application;
 using SeniorTicker.Domain;
 
 namespace SeniorTicker.Processing.Naive;
 
 /// <summary>
-/// «Простой вариант» остановки: тики копятся в обычном списке, а отдельный флашер пишет накопленное
-/// пачкой раз в интервал — и всё на ОДНОМ общем токене. При штатной остановке токен рубит и ожидание,
-/// и запись: накопленный буфер не дописан = потеря данных. Никаких Channel — наивный вариант их не
-/// использует; правильная остановка (двухфазный дренаж: закрыть вход → дочитать → дописать) — в advanced.
+/// «Простой вариант» остановки: тики копятся в очереди, отдельный флашер пишет их пачкой раз в
+/// интервал — на ОДНОМ общем токене. При остановке этот токен отменяет и ожидание, и запись, поэтому
+/// накопленное не дописывается и теряется. Никаких Channel — наивный вариант их не использует;
+/// корректная остановка (двухфазная: закрыть вход, дочитать, дописать) — в advanced-решении.
 /// </summary>
 public sealed class NaiveBufferingProcessor(ITickSink sink)
 {
-    private readonly List<Tick> _buffer = [];
-    private readonly object _gate = new();
+    private readonly ConcurrentQueue<Tick> _buffer = new();
 
-    /// <summary>Коннектор просто кладёт тик в общий буфер.</summary>
-    public void Add(Tick tick)
-    {
-        lock (_gate)
-            _buffer.Add(tick);
-    }
+    /// <summary>Коннектор кладёт тик в общую очередь.</summary>
+    public void Add(Tick tick) => _buffer.Enqueue(tick);
 
     public async Task RunAsync(CancellationToken hostToken)
     {
@@ -27,23 +23,19 @@ public sealed class NaiveBufferingProcessor(ITickSink sink)
         {
             while (true)
             {
-                await Task.Delay(50, hostToken); // один токен и на ожидание, и на запись
+                await Task.Delay(50, hostToken); // тот же токен на ожидание и на запись
 
-                Tick[] batch;
-                lock (_gate)
-                {
-                    if (_buffer.Count == 0)
-                        continue;
-                    batch = _buffer.ToArray();
-                    _buffer.Clear();
-                }
+                var batch = new List<Tick>();
+                while (_buffer.TryDequeue(out var tick))
+                    batch.Add(tick);
 
-                await sink.WriteBatchAsync(batch, hostToken);
+                if (batch.Count > 0)
+                    await sink.WriteBatchAsync(batch.ToArray(), hostToken);
             }
         }
         catch (OperationCanceledException)
         {
-            // hostToken отменён на ожидании или записи → накопленный буфер потерян, не дописан.
+            // токен отменён на ожидании или записи: накопленная очередь не дописана и теряется
         }
     }
 }
