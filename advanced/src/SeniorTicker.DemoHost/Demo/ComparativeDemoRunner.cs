@@ -7,7 +7,7 @@ namespace SeniorTicker.DemoHost.Demo;
 public sealed class ComparativeDemoRunner
 {
     private readonly DemoDatabase _database;
-    private readonly IDemoModeRunner[] _modes;
+    private readonly DemoModeRunner _runner;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly ILogger<ComparativeDemoRunner>? _log;
     private DemoConfig _config = new();
@@ -21,11 +21,7 @@ public sealed class ComparativeDemoRunner
     {
         _database = database;
         _log = log;
-        _modes =
-        [
-            new NaiveDemoModeRunner(DemoMode.Naive, dataSource),
-            new DemoModeRunner(DemoMode.ChannelsDedupKey, dataSource, new DedupKeyShardPartitioner()),
-        ];
+        _runner = new DemoModeRunner(DemoMode.ChannelsDedupKey, dataSource, new DedupKeyShardPartitioner());
     }
 
     public async Task StartAsync(DemoConfig config, CancellationToken ct)
@@ -46,8 +42,7 @@ public sealed class ComparativeDemoRunner
                 _config.BatchMaxSize,
                 _config.SinkDelayMs);
             await _database.EnsureCreatedAsync(ct);
-            foreach (var mode in _modes)
-                await mode.StartAsync(_config);
+            await _runner.StartAsync(_config);
             _running = true;
             _state = DemoRunStates.Running;
             _log?.LogInformation("Demo running");
@@ -93,8 +88,7 @@ public sealed class ComparativeDemoRunner
             await StopCoreAsync("reset-before-truncate", setStoppedState: false);
             await _database.EnsureCreatedAsync(ct);
             await _database.ResetAsync(ct);
-            foreach (var mode in _modes)
-                mode.ResetStats(_config);
+            _runner.ResetStats(_config);
             _running = false;
             _state = DemoRunStates.Stopped;
             _log?.LogInformation("Demo database truncated and visible counters reset");
@@ -113,11 +107,11 @@ public sealed class ComparativeDemoRunner
     }
 
     public DemoSnapshot Snapshot()
-        => new(_running, _state, _config, DateTimeOffset.UtcNow, _modes.Select(m => m.Snapshot()).ToArray());
+        => new(_running, _state, _config, DateTimeOffset.UtcNow, [_runner.Snapshot()]);
 
     private async Task StopCoreAsync(string reason, bool setStoppedState)
     {
-        await Task.WhenAll(_modes.Select(mode => mode.StopAsync()));
+        await _runner.StopAsync();
         _running = false;
         if (setStoppedState)
             _state = DemoRunStates.Stopped;
@@ -126,14 +120,18 @@ public sealed class ComparativeDemoRunner
 
     private void LogStopSummary(string reason)
     {
-        var modes = _modes.Select(m => m.Snapshot()).ToArray();
-        if (!modes.Any(m => m.Accepted > 0 || m.Written > 0 || m.DbRows > 0))
+        var mode = _runner.Snapshot();
+        if (mode.Accepted == 0 && mode.Written == 0 && mode.DbRows == 0)
             return;
 
         _log?.LogInformation(
-            "Demo stopped ({Reason}): {Summary}",
+            "Demo stopped ({Reason}): {Mode}: accepted={Accepted}, dedup={Deduplicated}, written={Written}, dbRows={DbRows}, shardAccepted=[{ShardAccepted}]",
             reason,
-            string.Join(" | ", modes.Select(m =>
-                $"{m.Mode}: accepted={m.Accepted}, dedup={m.Deduplicated}, written={m.Written}, dbRows={m.DbRows}, shardAccepted=[{string.Join(",", m.ShardAccepted)}]")));
+            mode.Mode,
+            mode.Accepted,
+            mode.Deduplicated,
+            mode.Written,
+            mode.DbRows,
+            string.Join(",", mode.ShardAccepted));
     }
 }

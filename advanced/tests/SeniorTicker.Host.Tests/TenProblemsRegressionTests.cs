@@ -72,7 +72,7 @@ public class TenProblemsRegressionTests
     public void Problem03_shard_index_is_always_in_range_for_adversarial_symbols()
     {
         const int shards = 7;
-        // широкий набор символов, включая такие, что у наивного int-хеша дали бы отрицательный %.
+        // широкий набор символов, включая такие, что при int-хеше с оператором % дали бы отрицательный индекс.
         for (var i = 0; i < 20_000; i++)
         {
             var symbol = $"SYM{i}/USDT-{(char)('A' + (i % 26))}{i * 2654435761u}";

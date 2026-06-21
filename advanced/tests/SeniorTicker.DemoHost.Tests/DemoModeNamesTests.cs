@@ -7,6 +7,6 @@ public class DemoModeNamesTests
     [Fact]
     public void Display_names_are_russian_for_demo_ui()
     {
-        Assert.Equal("Правильный: Channels + дедупликация по ключу тика", DemoMode.ChannelsDedupKey.ToDisplayName());
+        Assert.Equal("Channels + дедупликация по ключу тика", DemoMode.ChannelsDedupKey.ToDisplayName());
     }
 }
