@@ -1,11 +1,9 @@
-# Два решения StreamTicker (для разбора в видео)
+# Решение StreamTicker (для разбора в видео)
 
-Решение продублировано на две папки — так удобно показывать код «по папкам».
-Общий нижний слой (Domain, Application, MockExchange, WebSockets) в обеих папках дублируется — это
-сознательно, для обучения. Корневые `Directory.Build.props` / `Directory.Packages.props` / `global.json`
-наследуются обеими (одни версии пакетов, без дублей конфигурации).
+Одно решение в папке `advanced/`. Корневые `Directory.Build.props` / `Directory.Packages.props` /
+`global.json` задают единые версии пакетов для всех проектов.
 
-## `advanced/` — хорошее решение
+## `advanced/` — конвейер обработки тиков
 
 Channels + шарды + binary COPY + двухфазная остановка. Запускается в режиме `Pipeline:Mode=Channels`
 (по умолчанию). Все тесты зелёные.
@@ -16,25 +14,28 @@ Channels + шарды + binary COPY + двухфазная остановка. �
 - Запись (соединение-на-пачку + COPY): `advanced/src/SeniorTicker.Infrastructure.Persistence.Postgres/CopyTickSink.cs`
 - Двухфазная остановка: `advanced/src/SeniorTicker.Host/Pipeline/PipelineHostedService.cs`
 - Шардирование: `SymbolShardPartitioner.cs` (по `Symbol`) и `DedupKeyShardPartitioner.cs` (горячий тикер, по `TickKey`) — переключаются конфигом `Pipeline:ShardCount` / партиционером.
-- Демо сравнения режимов: `advanced/src/SeniorTicker.DemoHost/` + `frontend/senior-ticker-demo/`
 
-## `naive/` — наивное решение (антипример)
+## Демо: живой дашборд конвейера
 
-Обработка на потоке-источнике, общий дедуп, запись по тику, остановка одним токеном, без очередей.
-Запускается в режиме `Pipeline:Mode=Naive` (по умолчанию в `naive/`). Демо-тесты намеренно красные.
+`advanced/src/SeniorTicker.DemoHost/` + `frontend/senior-ticker-demo/` — live-дашборд одного
+конвейера под нагрузкой. Параметры нагрузки (тиков/с, доля горячего символа, дубли, шарды,
+писатели, размер батча, задержка БД) задаются с фронтенда; снимок метрик стримится по SSE.
 
-- `naive/SeniorTicker.Naive.sln`
-- Наивный дедуп (общий словарь + кольцо, 32-битный ключ): `naive/src/SeniorTicker.Processing/Naive/NaiveDeduplicator.cs`
-- Наивный конвейер (общий дедуп, запись по тику, безлимитный вход): `naive/src/SeniorTicker.Processing/Naive/NaivePipeline.cs`
-- Наивная остановка одним токеном (теряет буфер): `naive/src/SeniorTicker.Processing/Naive/NaiveBufferingProcessor.cs`
-- Наивная запись (общий `DbContext`, `SaveChanges` на тик): `naive/src/SeniorTicker.Infrastructure.Persistence.Postgres/NaiveDbContextSink.cs`
-- Падающие демо-тесты: `naive/tests/SeniorTicker.Processing.Tests/SimpleVariantTests.cs`
-  - `dotnet test naive/SeniorTicker.Naive.sln` → красные: 1000→20 (дедуп), коллапс SourceId, ArgumentException (запись), 100→0 (остановка).
+Метрики на карте конвейера:
 
-## Лестница ↔ акты дека
+- принято / дедуплицировано / записано / в БД;
+- глубина очередей (вход + батч-канал + шарды) — backpressure держит память под нагрузкой;
+- пропускная способность (получено/с, записано/с);
+- распределение входа по шардам и глубина очередей шардов.
 
-| Акт | Папка | Главное |
-|-----|-------|---------|
-| 1 | `naive/` | ломаем по шагам: дедупликация, запись, остановка, «без очередей» |
-| 2 | `advanced/` | чиним по концепциям: очередь+backpressure, один владелец, батч+COPY, двухфазная остановка |
-| 3 | `advanced/` | масштаб: шарды по `Symbol`, горячий тикер по `TickKey` + доказательство тестами |
+API: `GET /api/demo/snapshot`, `GET /api/demo/events` (SSE), `POST /api/demo/start|stop|reset`.
+
+## Концепции, которые показывает демо
+
+| Концепция | Где в коде |
+|-----------|------------|
+| Очередь + backpressure (ограниченные каналы) | `TickPipeline.cs`, `PipelineOptions` |
+| Один владелец дедупликации (без локов) | `SlidingWindowDeduplicator.cs` |
+| Батч + binary COPY | `CopyTickSink.cs` |
+| Двухфазная остановка (дренаж без потерь) | `PipelineHostedService.cs` |
+| Шарды по `Symbol` / горячий тикер по `TickKey` | `SymbolShardPartitioner.cs`, `DedupKeyShardPartitioner.cs` |

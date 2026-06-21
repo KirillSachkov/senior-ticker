@@ -145,7 +145,7 @@ export default function App() {
       <header className="topbar">
         <div>
           <p className="eyebrow">SeniorTicker</p>
-          <h1>Сравнение обработки горячего символа</h1>
+          <h1>Конвейер обработки горячего символа под нагрузкой</h1>
         </div>
         <div className="status-cluster" aria-label="Состояние демо">
           <span className={`status-dot ${snapshot.running ? "is-running" : ""} ${isTransitionState(state) ? "is-busy" : ""}`} />
@@ -250,7 +250,7 @@ export default function App() {
         <Metric label="Записано всего" value={formatNumber.format(totalWritten)} />
       </section>
 
-      <section className="modes-grid" aria-label="Режимы обработки">
+      <section className="modes-grid" aria-label="Конвейер обработки">
         {snapshot.modes.map((mode) => (
           <ModeCard key={mode.mode} mode={mode} rates={rates[mode.mode]} />
         ))}
@@ -397,7 +397,7 @@ function shortNumber(value: number) {
 function modeCaption(mode: string) {
   switch (mode) {
     case "channels-dedup-key":
-      return "Правильный: ключ тика";
+      return "Channels + шарды по ключу тика";
     default:
       return mode;
   }

@@ -37,3 +37,12 @@ dist/
 *.tsbuildinfo
 frontend/**/vite.config.js
 frontend/**/vite.config.d.ts
+
+# Agent / tooling artifacts
+.playwright-cli/
+.playwright-mcp/
+.serena/
+
+# Screenshots (keep out of the repo root)
+screenshots/
+/*.png
