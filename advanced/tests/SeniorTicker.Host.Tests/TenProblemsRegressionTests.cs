@@ -1,6 +1,7 @@
 using System.Net.WebSockets;
 using System.Runtime.CompilerServices;
 using System.Text;
+using Microsoft.Extensions.Diagnostics.Metrics.Testing;
 using Polly;
 using SeniorTicker.Application;
 using SeniorTicker.Domain;
@@ -33,7 +34,7 @@ public class TenProblemsRegressionTests
         const int unique = 5000;
         const int producers = 8;
         var sink = new CountingTickSink();
-        var metrics = new MetricsSink();
+        var metrics = new CountingMetricsSink();
         var pipeline = new TickPipeline(RegressionOptions(), sink, metrics, TimeProvider.System);
         var run = pipeline.RunAsync(CancellationToken.None);
 
@@ -46,10 +47,9 @@ public class TenProblemsRegressionTests
         pipeline.Input.Complete();
         await run;
 
-        var snap = metrics.Snapshot();
         // РОВНО unique записано, остальное — дубли. Гонка (TryAdd+Exchange) дала бы недетерминированный счёт.
         Assert.Equal(unique, sink.Written);
-        Assert.Equal((long)(producers - 1) * unique, snap.Deduplicated);
+        Assert.Equal((long)(producers - 1) * unique, metrics.Deduplicated);
     }
 
     // ── #2: 32-битный хеш-ключ → ложные схлопывания. Точный составной ключ с тайбрейкером ───────────
@@ -135,21 +135,26 @@ public class TenProblemsRegressionTests
         Assert.True(toRetries >= 1);
     }
 
-    // ── #7: рассинхрон метрик (частичный reset). Консистентный монотонный снимок, читаемый вместе ───
+    // ── #7: рассинхрон метрик (частичный reset). Стандартный аддитивный Counter снимает проблему ─────
     [Fact]
-    public void Problem07_metrics_snapshot_is_consistent_and_non_resetting()
+    public void Problem07_metrics_go_through_standard_additive_counters()
     {
-        var metrics = new MetricsSink();
+        using var metrics = new MetricsSink();
+        using var received = new MetricCollector<long>(metrics.Meter, "ticker.received");
+        using var deduplicated = new MetricCollector<long>(metrics.Meter, "ticker.deduplicated");
+        using var written = new MetricCollector<long>(metrics.Meter, "ticker.written");
+
         metrics.OnReceived(10);
         metrics.OnDeduplicated(3);
         metrics.OnWritten(7);
 
-        var first = metrics.Snapshot();
-        var second = metrics.Snapshot();
-
-        Assert.Equal(new MetricsSnapshot(10, 3, 7, 0), first);
-        Assert.Equal(first, second);   // снимок НЕ сбрасывает → rate по дельтам не корраптится
-        Assert.Equal(3, first.Gap);    // in(10) - written(7)
+        // Counter<long> монотонен и аддитивен по конструкции: ручного snapshot/reset (баг ученика,
+        // рассинхронивший метрики) тут нет. gap = received − written считает потребитель, не хранится.
+        Assert.Equal(10, received.GetMeasurementSnapshot().Sum(m => m.Value));
+        Assert.Equal(3, deduplicated.GetMeasurementSnapshot().Sum(m => m.Value));
+        Assert.Equal(7, written.GetMeasurementSnapshot().Sum(m => m.Value));
+        Assert.Equal(3,
+            received.GetMeasurementSnapshot().Sum(m => m.Value) - written.GetMeasurementSnapshot().Sum(m => m.Value));
     }
 
     // ── #8: фикс-буфер 16 КБ → потеря крупных кадров. Растущий буфер до cap + abort за cap ───────────
@@ -224,6 +229,18 @@ public class TenProblemsRegressionTests
             Interlocked.Add(ref _written, batch.Length);
             return Task.CompletedTask;
         }
+    }
+
+    // Дубль порта метрик: читаем счётчики напрямую, не завязываясь на механизм экспорта (тест про
+    // конвейер, а не про OTel).
+    private sealed class CountingMetricsSink : IMetricsSink
+    {
+        private long _deduplicated;
+        public long Deduplicated => Interlocked.Read(ref _deduplicated);
+        public void OnReceived(long n = 1) { }
+        public void OnDeduplicated(long n = 1) => Interlocked.Add(ref _deduplicated, n);
+        public void OnWritten(long n) { }
+        public void OnDropped(long n = 1) { }
     }
 
     // WebSocket-дублёр: отдаёт заданные фрагменты, режа по размеру буфера (для теста растущего буфера).

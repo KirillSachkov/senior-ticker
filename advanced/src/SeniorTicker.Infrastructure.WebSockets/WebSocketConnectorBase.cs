@@ -24,12 +24,13 @@ public sealed class WebSocketConnectorBase(
 
     public async Task RunAsync(CancellationToken ct)
     {
+        // Оборачиваем цикл приёма в Polly-политику переподключения: любой сбой ведёт к reconnect,
+        // а отмена (штатная остановка) пробрасывается и выходит из цикла.
         var pipeline = ResiliencePipelineFactory.CreateReconnectPipeline(options, (ex, delay, attempt) =>
             logger.LogWarning(ex, "{Name}: reconnect attempt {Attempt} in {Delay}", Name, attempt + 1, delay));
         try
         {
-            await pipeline.ExecuteAsync(async token => await ConnectAndConsumeAsync(token), ct)
-                ;
+            await pipeline.ExecuteAsync(async token => await ConnectAndConsumeAsync(token), ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -39,13 +40,17 @@ public sealed class WebSocketConnectorBase(
 
     private async Task ConnectAndConsumeAsync(CancellationToken ct)
     {
+        // Шаг 1. Создаём сокет и подключаемся с таймаутом на connect.
         using var socket = socketFactory();
         await ConnectWithTimeoutAsync(socket, ct);
         logger.LogInformation("{Name}: connected to {Url}", Name, options.Url);
 
+        // Шаг 2. Цикл приёма: один проход = одно сообщение, пока не попросили остановиться.
         var receiver = new WebSocketMessageReceiver(options.InitialReceiveBufferBytes, options.MaxMessageBytes);
         while (!ct.IsCancellationRequested)
         {
+            // Шаг 2а. Читаем одно полное сообщение (с idle-таймаутом). Сервер закрыл соединение: бросаем
+            // исключение, его поймает Polly и переподключится.
             using var msg = await ReceiveWithIdleTimeoutAsync(receiver, socket, ct);
             if (msg.IsClosed)
             {
@@ -53,9 +58,8 @@ public sealed class WebSocketConnectorBase(
                 throw new WebSocketException(WebSocketError.ConnectionClosedPrematurely); // → Polly reconnect
             }
 
-            // No-throw гейт уровня конвейера: НИ ОДИН парсер не должен уронить receive-loop недоверенным
-            // кадром (иначе тривиальный DoS под int.MaxValue reconnect). Дополняет внутренние catch парсеров —
-            // даже будущий парсер с неполным catch-списком тут безопасно деградирует в drop+метрику.
+            // Шаг 2б. Парсим кадр в Tick. Парсер кинул исключение или не смог распарсить: считаем дроп
+            // и идём к следующему сообщению, соединение не рвём.
             bool parsed;
             Tick tick = default;
             try
@@ -69,6 +73,8 @@ public sealed class WebSocketConnectorBase(
                 continue;
             }
 
+            // Шаг 2в. Проверяем значения. Невалидный тик дропаем. Валидный отдаём в конвейер: на полном
+            // входном канале IngestAsync ждёт (backpressure).
             if (!parsed) { metrics.OnDropped(); continue; }
             if (!TickValidator.IsValid(tick, time)) { metrics.OnDropped(); continue; }
             await ingestor.IngestAsync(tick, ct);

@@ -12,8 +12,8 @@ namespace SeniorTicker.Processing;
 /// </summary>
 public sealed class ShardWorker(
     IDeduplicator dedup,
-    int maxSize,
-    TimeSpan maxDelay,
+    int maxSize,        // N: максимум тиков в одной пачке
+    TimeSpan maxDelay,  // T: максимум времени на сбор одной пачки
     TimeProvider time,
     IMetricsSink metrics)
 {
@@ -22,14 +22,20 @@ public sealed class ShardWorker(
         ChannelWriter<Tick[]> sink,
         CancellationToken ct)
     {
+        // Внешний цикл: одна итерация = одна пачка. WaitToReadAsync ждёт, пока в шард-канале появится
+        // хотя бы один тик; когда канал закрыт и пуст, возвращает false, и воркер выходит.
         while (await source.WaitToReadAsync(ct))
         {
+            // Шаг 1. Заводим новую пустую пачку и запускаем таймер дедлайна T на её сбор.
             var batch = new List<Tick>(maxSize);
             using var timerCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             var timer = Task.Delay(maxDelay, time, timerCts.Token);
 
+            // Шаг 2. Наполняем пачку, пока в ней меньше N тиков.
             while (batch.Count < maxSize)
             {
+                // Шаг 2а. Пробуем взять тик без ожидания. Повтор пропускаем (и считаем метрику), уникальный
+                // кладём в пачку и сразу идём за следующим: так забираем всё, что уже лежит в канале.
                 if (source.TryRead(out var tick))
                 {
                     if (dedup.IsDuplicate(tick)) { metrics.OnDeduplicated(); continue; }
@@ -37,12 +43,17 @@ public sealed class ShardWorker(
                     continue;
                 }
 
+                // Шаг 2б. В канале сейчас пусто. Ждём, что наступит раньше: придёт новый тик (ready) или
+                // сработает таймер T. Таймер раньше: выходим и флашим что набрали. ready вернул false: канал
+                // закрыт, выходим. ready вернул true: тик пришёл, продолжаем цикл, его заберёт TryRead.
                 var ready = source.WaitToReadAsync(ct).AsTask();
                 var winner = await Task.WhenAny(ready, timer);
-                if (winner == timer) break;             // флаш по времени T
-                if (!await ready) break; // источник завершён
+                if (winner == timer) break;
+                if (!await ready) break;
             }
 
+            // Шаг 3. Пачка готова (набрали N, вышло время T или закрылся канал). Гасим таймер и поглощаем его
+            // задачу, чтобы не осталось необработанного исключения. Непустую пачку пишем массивом в общий батч-канал.
             timerCts.Cancel();
             await ObserveAsync(timer);
 

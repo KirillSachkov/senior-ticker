@@ -2,7 +2,7 @@
 
 Имитация системы реального времени: несколько WebSocket-клиентов подключаются к биржевым фидам
 (у каждой биржи **свой формат**), поток нормализуется → дедуплицируется → пишется в PostgreSQL;
-ведётся структурное логирование и счётчики. Нагрузка по ТЗ — **50–100 тиков/сек**.
+ведётся структурное логирование (Serilog) и метрики (OpenTelemetry). Нагрузка по ТЗ — **50–100 тиков/сек**.
 
 > **Тезис решения.** Нагрузка занижена **намеренно**. Проверяют не «вывезешь ли поток», а **строишь
 > ли корректные конкурентные гарантии и можешь ли защитить каждый выбор** (принцип «No Vibecoding»).
@@ -11,7 +11,7 @@
 > многопоточности»); найденные там **10 проблем** закрыты конструктивно — см. таблицу ниже.
 
 Стек: **.NET 10 (C# 14)**, `System.Threading.Channels`, **PostgreSQL** (Npgsql binary COPY),
-**EF Core 10** (только схема/миграции), **Polly v8**, **Serilog**, xUnit + **Testcontainers**.
+**EF Core 10** (только схема/миграции), **Polly v8**, **Serilog**, **OpenTelemetry** (метрики), xUnit + **Testcontainers**.
 
 Полный дизайн-документ: [`docs/superpowers/specs/2026-05-29-senior-ticker-design.md`](docs/superpowers/specs/2026-05-29-senior-ticker-design.md).
 
@@ -35,8 +35,10 @@ dotnet run --project src/SeniorTicker.MockExchange --urls http://127.0.0.1:5000
 # 4. Host в Development-профиле (коннекторы из appsettings.Development.json смотрят на mock по loopback)
 DOTNET_ENVIRONMENT=Development dotnet run --project src/SeniorTicker.Host
 ```
-Host применит миграции, поднимет коннекторы, и раз в секунду в лог пойдут метрики
-`in / deduped / written / dropped / gap / channel depth`. Завершение — `Ctrl+C` (двухфазный дренаж).
+Host применит миграции, поднимет коннекторы, и раз в секунду OpenTelemetry выведет в консоль метрики
+конвейера: счётчики `ticker.received / deduplicated / written / dropped` и глубины каналов
+`ticker.ingest.queue.depth / ticker.batch.queue.depth` (gap = received минус written и rate считает
+потребитель). Завершение — `Ctrl+C` (двухфазная остановка).
 
 ```bash
 dotnet test          # все тесты (integration/persistence требуют Docker)
@@ -83,7 +85,7 @@ MockExchange — dev/integration-заглушка (Kestrel, 3 формата)
 |---|---|
 | `Domain` | `Tick` (readonly record struct), точный `TickKey`, `StableHash` (FNV-1a) — **ноль пакетов** |
 | `Application` | Только порты: `IExchangeConnector/IMessageParser/IDeduplicator/ITickSink/IMetricsSink/ITickIngestor` |
-| `Processing` | Channels-движок: router → шарды (single-writer дедуп + батчер N-или-T) → writers; двухфазный дренаж |
+| `Processing` | Channels-движок: router → шарды (single-writer дедуп + батчер N-или-T) → writers; двухфазная остановка |
 | `Infrastructure.WebSockets` | Коннектор + 3 парсера + растущий receive-буфер + Polly reconnect + `TickValidator` |
 | `Infrastructure.Persistence.Postgres` | `CopyTickSink` (binary COPY) + EF-схема/миграции |
 | `Host` | Единственный composition root: DI, конфиг, Serilog, метрики, оркестрация старта/останова |
@@ -116,9 +118,9 @@ K writer-воркеров (каждый своё NpgsqlConnection) → binary CO
 | **2** | 32-битный хеш-ключ → ложные дубли | точный составной `TickKey` (Exchange, Symbol, Timestamp, **SourceId**-тайбрейкер) | `Problem02_distinct_ticks_in_same_millisecond_are_not_collapsed`; `Distinct_ticks_same_symbol_same_timestamp_are_NOT_collapsed` |
 | **3** | Переполнение `int` → отрицательный индекс шарда | FNV-1a → `ulong`, маска `% P` неотрицательна по построению | `Problem03_shard_index_is_always_in_range_for_adversarial_symbols`; `Fnv1a64_matches_golden_vectors` |
 | **4** | Общий `DbContext` / captive dependency | **connection-per-writer** (`NpgsqlConnection` не thread-safe) из `NpgsqlDataSource`; EF только схема | `Concurrent_writers_each_own_connection_no_corruption` *(Persistence, Testcontainers)* |
-| **5** | Shutdown теряет данные | **двухфазный дренаж** через `Input.Complete()` (не отмена) + drain-дедлайн | `Problem05_shutdown_drains_buffer_without_loss`; `StopAsync_drains_all_buffered_ticks_without_loss`; `Drains_all_ticks_without_loss_under_backpressure` |
+| **5** | Shutdown теряет данные | **двухфазная остановка** через `Input.Complete()` (не отмена) + drain-дедлайн | `Problem05_shutdown_drains_buffer_without_loss`; `StopAsync_drains_all_buffered_ticks_without_loss`; `Drains_all_ticks_without_loss_under_backpressure` |
 | **6** | Polly ловит `OperationCanceledException` | Polly v8 дефолтный `ShouldHandle` исключает OCE → отмена распространяется мгновенно | `Problem06_reconnect_policy_does_not_retry_cancellation`; `Connector_auto_reconnects_after_server_drops_connection` |
-| **7** | Рассинхрон метрик (частичный reset) | **консистентный монотонный снимок** (`Interlocked`, читается вместе, не сбрасывается), rate по дельтам | `Problem07_metrics_snapshot_is_consistent_and_non_resetting`; `Concurrent_increments_are_not_lost` |
+| **7** | Рассинхрон метрик (частичный reset) | **стандартные счётчики OpenTelemetry** (`Counter<long>` на Meter, монотонны и аддитивны by design — ручного snapshot/reset нет), rate и gap считает потребитель | `Problem07_metrics_go_through_standard_additive_counters`; `Concurrent_increments_are_not_lost` |
 | **8** | Фикс-буфер 16 КБ → потеря крупных кадров | растущий `ArrayPool`-буфер до `MaxMessageBytes`, превышение → явный abort/reconnect | `Problem08_receiver_grows_past_initial_buffer_and_caps_at_max`; `Reassembles_a_multi_fragment_message_larger_than_initial_buffer` |
 | **9** | Debug-коннектор в проде | регистрация **только enabled** + `ValidateOnStart` wss-гейт (`ws://` лишь на loopback → fail boot) | `Problem09_public_ws_connector_fails_boot`; `Enabled_public_ws_fails_boot` |
 | **10** | sync `EnsureCreated()` в конструкторе | миграции отдельным `IHostedService` **до** writers, через `IDbContextFactory.MigrateAsync` | `Initialize_applies_migrations_via_factory_and_is_idempotent` *(Persistence, Testcontainers)* |
@@ -138,10 +140,10 @@ K writer-воркеров (каждый своё NpgsqlConnection) → binary CO
 - **Backpressure:** оба канала bounded (`FullMode.Wait`). Медленная БД → `Channel<Tick[]>` полон →
   батчер ждёт → `Channel<Tick>` полон → дедуп тормозит → коннектор реже читает сокет → TCP flow
   control. **Память — константа** `cap₁·sizeof(Tick) + cap₂·avgBatch`, независимая от входной скорости.
-- **Двухфазный дренаж (фикс №5/№6) выпадает из LIFO-порядка хостед-сервисов.** Регистрируем
+- **Двухфазная остановка (фикс №5/№6) выпадает из LIFO-порядка хостед-сервисов.** Регистрируем
   `DbInit → Metrics → Pipeline → Connectors`; Generic Host останавливает в обратном порядке: коннекторы
   гаснут **первыми** (вход перекрыт), затем `PipelineHostedService` делает `Input.Complete()` и ждёт
-  естественный дренаж в пределах `Shutdown:DrainTimeoutSeconds`. `HostOptions.ShutdownTimeout` ставится
+  дочитывание остатка в пределах `Shutdown:DrainTimeoutSeconds`. `HostOptions.ShutdownTimeout` ставится
   строго больше. Отмена = abort (только при превышении drain). Координация = порядок регистрации + один
   `Complete()`, без таймеров/флагов.
 
@@ -177,7 +179,7 @@ In-process Channels = **at-most-once при `kill -9`**: всё между «п�
 
 | Гарантия | Статус |
 |---|---|
-| No-loss при штатном `SIGTERM` | ✅ двухфазный дренаж |
+| No-loss при штатном `SIGTERM` | ✅ двухфазная остановка |
 | Exactly-once **as stored** | ✅ идемпотентный составной ключ + UNIQUE-backstop |
 | At-least-once через крэш | ❌ требует Tier-1 spool (документированный путь, не код) |
 | Exactly-once **end-to-end** | ❌ **невозможно** — WS-фид без ack/replay; тик, потерянный на проводе до приёма, недетектируем |
@@ -222,8 +224,8 @@ loopback) + env/user-secrets (секреты). Ручки:
 | `Pipeline:BatchChannelCapacity` | 8 | ёмкость батч-канала |
 | `Pipeline:BatchMaxSize` / `BatchMaxDelayMs` | 900 / 100 | флаш N-или-T (900 держит массив < LOH) |
 | `Pipeline:DedupWindowSeconds` | 60 | окно дедупа |
-| `Shutdown:DrainTimeoutSeconds` | 30 | бюджет дренажа (< `HostOptions.ShutdownTimeout`) |
-| `Metrics:IntervalSeconds` | 1 | период публикации метрик |
+| `Shutdown:DrainTimeoutSeconds` | 30 | бюджет остановки (< `HostOptions.ShutdownTimeout`) |
+| `Metrics:IntervalSeconds` | 1 | интервал экспорта метрик в консоль (OpenTelemetry) |
 | `Postgres:MaxWriterConnections` | 8 | `MaxPoolSize` (гейт: ≥ `WriterCount` + 1) |
 | `ConnectionStrings:Postgres` | — | **секрет**: env `ConnectionStrings__Postgres` / user-secrets |
 
@@ -236,7 +238,7 @@ loopback) + env/user-secrets (секреты). Ручки:
 
 | Уровень | Что проверяет | Запуск |
 |---|---|---|
-| Unit | дедуп-инвариант, точный ключ, батчер N-или-T, дренаж, метрики, валидаторы, парсеры | `dotnet test` (быстрые, без Docker) |
+| Unit | дедуп-инвариант, точный ключ, батчер N-или-T, остановка, метрики, валидаторы, парсеры | `dotnet test` (быстрые, без Docker) |
 | 10 проблем | явный proof по каждой из §15 | `TenProblemsRegressionTests` + см. таблицу |
 | Load | 100k без потери, gen2/LOH ≈ 0, burst через backpressure | `LoadTests` |
 | Integration | reconnect, per-format парсинг, **end-to-end** MockExchange→Host→Postgres | требует **Docker** (Testcontainers) |

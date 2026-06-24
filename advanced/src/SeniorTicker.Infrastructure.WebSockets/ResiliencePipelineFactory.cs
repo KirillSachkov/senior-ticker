@@ -4,10 +4,10 @@ using Polly.Retry;
 namespace SeniorTicker.Infrastructure.WebSockets;
 
 /// <summary>
-/// Reconnect-политика: бесконечный retry с экспоненциальным backoff + jitter. Дефолтный
-/// ShouldHandle Polly v8 ретраит любое исключение КРОМЕ OperationCanceledException — то есть
-/// отмена (graceful shutdown) распространяется немедленно (фикс #6), а любой сетевой сбой/закрытие
-/// → переподключение. onRetry — для логирования.
+/// Политика переподключения: бесконечный retry с экспоненциальным backoff и jitter. Дефолтный
+/// ShouldHandle в Polly v8 ретраит любое исключение, кроме OperationCanceledException. Значит отмена
+/// (штатная остановка) распространяется немедленно, а любой сетевой сбой или закрытие ведут к
+/// переподключению. onRetry нужен для логирования.
 /// </summary>
 public static class ResiliencePipelineFactory
 {

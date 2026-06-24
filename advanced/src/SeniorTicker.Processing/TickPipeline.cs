@@ -5,11 +5,11 @@ using SeniorTicker.Domain;
 namespace SeniorTicker.Processing;
 
 /// <summary>
-/// Конвейер обработки в памяти: input → router(stableHash(TickKey)%P) → P шардов
-/// (single-writer дедупликация + батч) → shared Channel&lt;Tick[]&gt; → K writer-воркеров → ITickSink.
-/// Все каналы BOUNDED (FullMode.Wait) → явный backpressure и ограниченная память.
-/// Двухфазный дренаж: Input.Complete() → router завершает шарды → шарды флашат остаток →
-/// батч-канал завершается → writers дописывают → RunAsync возвращается. Отмена ct = abort.
+/// Конвейер обработки в памяти: input → router (stableHash(TickKey) % P) → P шардов
+/// (single-writer дедупликация + батч) → общий Channel&lt;Tick[]&gt; → K writer-воркеров → ITickSink.
+/// Все каналы ограниченные (bounded, FullMode.Wait): когда канал полон, предыдущая стадия ждёт,
+/// поэтому память под контролем. Остановка бывает штатной (Input.Complete, стадии дочитывают
+/// остаток и завершаются по очереди) или аварийной (отмена ct).
 /// </summary>
 public sealed class TickPipeline
 {
@@ -19,8 +19,15 @@ public sealed class TickPipeline
     private readonly TimeProvider _time;
     private readonly IShardPartitioner _partitioner;
 
+    // Вход конвейера: единая очередь сырых тиков. Пишут многие коннекторы, читает один роутер.
+    // Backpressure-стадия №1 (источник ↔ роутер): полон → коннектор ждёт → реже читает сокет.
     private readonly Channel<Tick> _ingest;
+    // P независимых очередей, по одной на ShardWorker. Роутер раскладывает тик: shard = hash(TickKey) % P.
+    // Каждую очередь читает ровно один воркер (single-consumer) — это и есть инвариант дедупликации.
+    // Backpressure-стадия №2 (роутер ↔ шард): полон → роутер ждёт на WriteAsync именно этого шарда.
     private readonly Channel<Tick>[] _shards;
+    // Общая очередь готовых батчей Tick[]. Пишут P шардов, читают K writer-воркеров.
+    // Backpressure-стадия №3 (шарды ↔ запись в sink/БД): полон → шарды ждут → давление катится назад к сокету.
     private readonly Channel<Tick[]> _batches;
 
     public TickPipeline(
@@ -45,16 +52,18 @@ public sealed class TickPipeline
         _time = time;
         _partitioner = partitioner ?? new DedupKeyShardPartitioner();
 
+        // FullMode.Wait = переполнение не дропает тик и не копит в RAM, а тормозит писателя (backpressure).
         _ingest = Channel.CreateBounded<Tick>(new BoundedChannelOptions(options.IngestCapacity)
         {
             FullMode = BoundedChannelFullMode.Wait,
-            SingleReader = true,   // один router читает вход
-            SingleWriter = false,  // много коннекторов пишут
+            SingleReader = true,   // один router читает вход → рантайм берёт оптимизированный single-reader путь
+            SingleWriter = false,  // много коннекторов пишут конкурентно → запись под локом
         });
 
         _shards = new Channel<Tick>[options.ShardCount];
         for (var i = 0; i < _shards.Length; i++)
         {
+            // single-reader + single-writer = самый дешёвый режим канала (минимум синхронизации).
             _shards[i] = Channel.CreateBounded<Tick>(new BoundedChannelOptions(options.ShardCapacity)
             {
                 FullMode = BoundedChannelFullMode.Wait,
@@ -63,6 +72,7 @@ public sealed class TickPipeline
             });
         }
 
+        // many-reader + many-writer → общий конкурентный режим (под локом): и пишущих, и читающих несколько.
         _batches = Channel.CreateBounded<Tick[]>(new BoundedChannelOptions(options.BatchChannelCapacity)
         {
             FullMode = BoundedChannelFullMode.Wait,
@@ -71,23 +81,24 @@ public sealed class TickPipeline
         });
     }
 
-    /// <summary>Точка входа для продюсеров (коннекторов). Backpressure #1.</summary>
+    /// <summary>Точка входа для продюсеров (коннекторов). Когда канал полон, продюсеры ждут.</summary>
     public ChannelWriter<Tick> Input => _ingest.Writer;
 
-    /// <summary>Глубина входного канала (для метрик §12: полный → лимитер дедупликации/батча).</summary>
+    /// <summary>Глубина входного канала (метрика): если полон, узкое место в дедупликации или батче.</summary>
     public int IngestDepth => _ingest.Reader.Count;
 
-    /// <summary>Глубина батч-канала (для метрик §12: полный → лимитер БД).</summary>
+    /// <summary>Глубина батч-канала (метрика): если полон, узкое место в записи в базу.</summary>
     public int BatchDepth => _batches.Reader.Count;
 
     public int[] ShardDepths => _shards.Select(s => s.Reader.Count).ToArray();
 
     public async Task RunAsync(CancellationToken ct)
     {
-        // Внутренняя отмена, связанная с внешним ct: гасится либо внешней отменой, либо
-        // падением writer'а (C1). Чистый дренаж её НЕ трогает — все воркеры выходят сами.
+        // Общий токен отмены для всех воркеров (связан с внешним ct).
         using var abort = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
+        // Шаг 1. Создаём и запускаем P воркеров, по одному на шард. У каждого свой дедупликатор. Воркер
+        // читает свой шард-канал _shards[i] и пишет готовые пачки в общий _batches. Ручку задачи кладём в shardTasks.
         var shardTasks = new Task[_shards.Length];
         for (var i = 0; i < _shards.Length; i++)
         {
@@ -96,16 +107,18 @@ public sealed class TickPipeline
             shardTasks[i] = worker.RunAsync(_shards[i].Reader, _batches.Writer, abort.Token);
         }
 
+        // Шаг 2. Запускаем роутер: он читает _ingest и раскладывает каждый тик в шард по hash(TickKey) % P.
         var routerTask = RouteAsync(abort.Token);
 
-        // когда все шарды доедены (или упали) — завершаем общий батч-канал в finally,
-        // чтобы writers вышли даже при фолте шарда (I1).
+        // Шаг 3. Запускаем фоновую задачу: ждёт завершения всех shardTasks и закрывает писателя _batches.
         var shardsCompletion = CompleteBatchesWhenShardsDoneAsync(shardTasks);
 
+        // Шаг 4. Создаём и запускаем K writer-воркеров: каждый читает _batches и пишет пачки в sink (БД).
         var writerTasks = new Task[_opt.WriterCount];
         for (var i = 0; i < writerTasks.Length; i++)
             writerTasks[i] = WriteLoopAsync(abort.Token, abort);
 
+        // Шаг 5. Собираем все задачи в один список и ждём их завершения: роутер, закрытие батчей, writers.
         var all = new List<Task>(2 + writerTasks.Length) { routerTask, shardsCompletion };
         all.AddRange(writerTasks);
         try
@@ -114,8 +127,8 @@ public sealed class TickPipeline
         }
         catch
         {
-            // Поверх отмены приоритетно поднимаем осмысленную ошибку (напр. фолт sink'а),
-            // сохраняя её стек, а не OperationCanceledException-следствие.
+            // Поверх отмены приоритетно поднимаем осмысленную ошибку (например, сбой sink),
+            // сохраняя её стек, а не производную OperationCanceledException.
             var fault = all.Where(t => t.IsFaulted)
                            .SelectMany(t => t.Exception!.InnerExceptions)
                            .FirstOrDefault(e => e is not OperationCanceledException);
@@ -139,12 +152,12 @@ public sealed class TickPipeline
             {
                 _metrics.OnReceived();
                 var shard = _shards[_partitioner.GetShard(tick, _shards.Length)];
-                await shard.Writer.WriteAsync(tick, ct); // backpressure #1
+                await shard.Writer.WriteAsync(tick, ct); // канал шарда полон, ждём
             }
         }
         finally
         {
-            // вход завершён (или отмена) → завершаем все шард-каналы, чтобы воркеры дофлашили остаток
+            // вход завершён (или отмена) → завершаем все шард-каналы, чтобы воркеры дописали остаток
             foreach (var shard in _shards)
                 shard.Writer.TryComplete();
         }
@@ -162,7 +175,7 @@ public sealed class TickPipeline
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            abort.Cancel(); // разблокируем шарды, припаркованные на WriteAsync(_batches)
+            abort.Cancel(); // разблокируем шарды, ждущие на WriteAsync(_batches)
             throw;
         }
     }

@@ -2,7 +2,7 @@ namespace SeniorTicker.Host.Configuration;
 
 /// <summary>
 /// Корневой узел конфигурации приложения (биндится от корня): источники + ручки конвейера,
-/// бюджет дренажа, период метрик. Валидируется на старте (<see cref="SeniorTickerOptionsValidator"/>).
+/// бюджет остановки, период метрик. Валидируется на старте (<see cref="SeniorTickerOptionsValidator"/>).
 /// </summary>
 public sealed class SeniorTickerOptions
 {

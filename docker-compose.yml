@@ -18,7 +18,7 @@ services:
   demo-api:
     build:
       context: .
-      dockerfile: src/SeniorTicker.DemoHost/Dockerfile
+      dockerfile: advanced/src/SeniorTicker.DemoHost/Dockerfile
     environment:
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=senior_ticker;Username=postgres;Password=postgres

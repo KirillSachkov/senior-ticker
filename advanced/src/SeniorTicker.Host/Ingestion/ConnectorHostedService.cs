@@ -7,10 +7,11 @@ using SeniorTicker.Host.Configuration;
 namespace SeniorTicker.Host.Ingestion;
 
 /// <summary>
-/// Запускает все enabled-коннекторы и держит их живыми до остановки. Регистрируется ПОСЛЕДНИМ →
-/// по LIFO-порядку Generic Host останавливается ПЕРВЫМ: отмена <c>stoppingToken</c> гасит reconnect
-/// (Polly v8 не ретраит OCE, #6), коннекторы выходят, вход конвейера перекрыт — и только потом
-/// начинается дренаж (<see cref="Pipeline.PipelineHostedService"/>). Это фаза ① двухфазного шатдауна §5.4.
+/// Запускает все включённые коннекторы и держит их живыми до остановки. Регистрируется последним,
+/// поэтому по LIFO-порядку Generic Host останавливается первым: отмена <c>stoppingToken</c> гасит
+/// переподключение (Polly v8 не ретраит отмену), коннекторы выходят, вход конвейера закрыт, и только
+/// потом начинается дочитывание остатка (<see cref="Pipeline.PipelineHostedService"/>). Это первая
+/// фаза двухфазной остановки.
 /// </summary>
 public sealed class ConnectorHostedService(
     ConnectorFactory factory,
@@ -22,7 +23,7 @@ public sealed class ConnectorHostedService(
         var connectors = factory.CreateEnabled(options.Value.Exchanges);
         if (connectors.Count == 0)
         {
-            logger.LogWarning("No enabled exchange connectors configured — nothing to ingest.");
+            logger.LogWarning("No enabled exchange connectors configured, nothing to ingest.");
             return;
         }
 
@@ -35,7 +36,7 @@ public sealed class ConnectorHostedService(
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
-            // штатная остановка — коннекторы погашены отменой
+            // штатная остановка: коннекторы погашены отменой
         }
     }
 }

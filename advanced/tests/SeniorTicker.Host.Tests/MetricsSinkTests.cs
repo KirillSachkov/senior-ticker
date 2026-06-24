@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Diagnostics.Metrics.Testing;
 using SeniorTicker.Host.Observability;
 
 namespace SeniorTicker.Host.Tests;
@@ -7,41 +8,43 @@ public class MetricsSinkTests
     [Fact]
     public async Task Concurrent_increments_are_not_lost()
     {
-        // #7: счётчики дёргаются из роутера/шардов/writers одновременно — Interlocked не теряет.
-        var sink = new MetricsSink();
+        // #7: счётчики дёргаются из роутера/шардов/writers одновременно. Counter<long>.Add потокобезопасен
+        // по конструкции — стандартный инструмент аддитивен, ни один инкремент не теряется.
+        using var sink = new MetricsSink();
+        using var written = new MetricCollector<long>(sink.Meter, "ticker.written");
         const int workers = 16;
         const int perWorker = 10_000;
 
         await Task.WhenAll(Enumerable.Range(0, workers).Select(_ => Task.Run(() =>
         {
             for (var i = 0; i < perWorker; i++)
-            {
-                sink.OnReceived();
                 sink.OnWritten(1);
-            }
         })));
 
-        var snap = sink.Snapshot();
-        Assert.Equal(workers * perWorker, snap.Received);
-        Assert.Equal(workers * perWorker, snap.Written);
-        Assert.Equal(0, snap.Gap);
+        Assert.Equal((long)workers * perWorker, written.GetMeasurementSnapshot().Sum(m => m.Value));
     }
 
     [Fact]
-    public void Snapshot_is_monotonic_and_non_resetting()
+    public void Each_event_increments_its_own_counter()
     {
-        // #7: снимок НЕ сбрасывает счётчики (баг ученика — частичный reset рассинхронизировал метрики).
-        var sink = new MetricsSink();
+        // Каждое событие конвейера идёт в свой стандартный Counter. gap = received − written считается
+        // снаружи (в самих метриках не хранится).
+        using var sink = new MetricsSink();
+        using var received = new MetricCollector<long>(sink.Meter, "ticker.received");
+        using var deduplicated = new MetricCollector<long>(sink.Meter, "ticker.deduplicated");
+        using var written = new MetricCollector<long>(sink.Meter, "ticker.written");
+        using var dropped = new MetricCollector<long>(sink.Meter, "ticker.dropped");
+
         sink.OnReceived(5);
         sink.OnDeduplicated(2);
         sink.OnWritten(3);
-        sink.OnDropped(1);
+        sink.OnDropped();
 
-        var first = sink.Snapshot();
-        var second = sink.Snapshot();
-
-        Assert.Equal(new MetricsSnapshot(5, 2, 3, 1), first);
-        Assert.Equal(first, second); // повторный снимок идентичен — ничего не сброшено
-        Assert.Equal(2, first.Gap);  // received(5) - written(3)
+        Assert.Equal(5, received.GetMeasurementSnapshot().Sum(m => m.Value));
+        Assert.Equal(2, deduplicated.GetMeasurementSnapshot().Sum(m => m.Value));
+        Assert.Equal(3, written.GetMeasurementSnapshot().Sum(m => m.Value));
+        Assert.Equal(1, dropped.GetMeasurementSnapshot().Sum(m => m.Value));
+        Assert.Equal(2,
+            received.GetMeasurementSnapshot().Sum(m => m.Value) - written.GetMeasurementSnapshot().Sum(m => m.Value));
     }
 }

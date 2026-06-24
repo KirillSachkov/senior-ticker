@@ -3,19 +3,19 @@ using SeniorTicker.Domain;
 namespace SeniorTicker.Infrastructure.WebSockets;
 
 /// <summary>
-/// Гейт значений недоверенного фида (§11). decimal исключает NaN/Infinity по типу; проверяем
-/// диапазон цены/объёма (нижняя И верхняя границы), окно времени (защищает окно дедупликации и BRIN-индекс
-/// по времени от абсурдных меток) и символ.
+/// Проверка значений недоверенного фида. decimal по типу исключает NaN и Infinity; дальше проверяем
+/// диапазон цены и объёма (нижняя и верхняя границы), окно времени (защищает окно дедупликации и
+/// индекс по времени от абсурдных меток) и символ.
 /// </summary>
 public static class TickValidator
 {
     public static readonly TimeSpan MaxPastSkew = TimeSpan.FromDays(7);
     public static readonly TimeSpan MaxFutureSkew = TimeSpan.FromMinutes(1);
 
-    /// <summary>Верхняя граница |цены| и |объёма|. Колонка БД — numeric(38,18) (целая часть &lt; 10^20):
-    /// значение с 21+ цифрой целой части прошло бы parser и нижний гейт, но уронило бы COPY
-    /// (numeric field overflow) → фолт конвейера → краш хоста одним кадром (remote DoS). 10^18 —
-    /// на порядки выше любой реальной цены/объёма и на 2 порядка ниже предела колонки.</summary>
+    /// <summary>Верхняя граница цены и объёма по модулю. Колонка в базе это numeric(38,18), целая часть
+    /// меньше 10^20. Значение с 21+ цифрой в целой части прошло бы парсер и нижнюю проверку, но уронило
+    /// бы COPY (numeric field overflow), а это сбой конвейера и падение хоста одним кадром (удалённый
+    /// DoS). 10^18 на порядки выше любой реальной цены или объёма и на два порядка ниже предела колонки.</summary>
     public const decimal MaxValue = 1_000_000_000_000_000_000m; // 10^18
 
     /// <summary>Верхняя граница длины тикера. Защищает память окна дедупликации и стоимость FNV-шардинга:
@@ -35,8 +35,8 @@ public static class TickValidator
         return true;
     }
 
-    // Whitelist: латиница/цифры + разделители реальных тикеров (BTCUSDT, BTC/USD, XBT-USD, BTC_USD, BTC.D).
-    // Отвергает мусор/мохибейк/гигантские метки до того, как они отравят окно дедупликации и BRIN-индекс по времени.
+    // Белый список: латиница, цифры и разделители реальных тикеров (BTCUSDT, BTC/USD, XBT-USD, BTC_USD, BTC.D).
+    // Отвергает мусор и гигантские метки до того, как они отравят окно дедупликации и индекс по времени.
     private static bool IsValidSymbol(string symbol)
     {
         if (string.IsNullOrEmpty(symbol) || symbol.Length > MaxSymbolLength) return false;

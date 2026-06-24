@@ -14,7 +14,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddPostgresPersistence(this IServiceCollection services, PostgresOptions options)
     {
         // Регистрируем через factory (не instance-overload), чтобы DI ВЛАДЕЛ NpgsqlDataSource и
-        // вызвал DisposeAsync на остановке хоста — иначе пул физических соединений не дренажится gracefully.
+        // вызвал DisposeAsync на остановке хоста — иначе пул физических соединений не закрывается gracefully.
         services.AddSingleton<NpgsqlDataSource>(_ =>
         {
             var dataSourceBuilder = new NpgsqlDataSourceBuilder(options.ConnectionString);

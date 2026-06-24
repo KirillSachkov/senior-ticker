@@ -335,11 +335,11 @@ function ModeCard({ mode, rates }: { mode: ModeSnapshot; rates?: ModeRates }) {
       </header>
 
       <div className="pipeline-row" aria-label={`Пайплайн ${mode.name}`}>
-        <PipelineStep label="Вход" value={mode.ingestDepth} tone="yellow" />
-        <PipelineStep label="Роутер" value={`${Math.round(skew * 100)}%`} tone={skew > 0.7 ? "red" : "green"} />
-        <PipelineStep label="Шарды" value={mode.shardDepths.length} tone="green" />
-        <PipelineStep label="Батчи" value={mode.batchDepth} tone={mode.batchDepth > 0 ? "yellow" : "green"} />
-        <PipelineStep label="PostgreSQL" value={formatNumber.format(mode.dbRows)} tone="purple" />
+        <PipelineStep label="Вход" value={mode.ingestDepth} tone="yellow" hint="(тиков в очереди на входе)" />
+        <PipelineStep label="Роутер" value={`${Math.round(skew * 100)}%`} tone={skew > 0.7 ? "red" : "green"} hint="(доля самого нагруженного шарда)" />
+        <PipelineStep label="Шарды" value={mode.shardDepths.length} tone="green" hint="(число параллельных шардов)" />
+        <PipelineStep label="Батчи" value={mode.batchDepth} tone={mode.batchDepth > 0 ? "yellow" : "green"} hint="(пачки ждут записи в БД)" />
+        <PipelineStep label="PostgreSQL" value={formatNumber.format(mode.dbRows)} tone="purple" hint="(всего строк записано в БД)" />
       </div>
 
       <div className="numbers-grid">
@@ -357,11 +357,12 @@ function ModeCard({ mode, rates }: { mode: ModeSnapshot; rates?: ModeRates }) {
   );
 }
 
-function PipelineStep(props: { label: string; value: string | number; tone: "green" | "yellow" | "red" | "purple" }) {
+function PipelineStep(props: { label: string; value: string | number; tone: "green" | "yellow" | "red" | "purple"; hint?: string }) {
   return (
     <div className={`pipeline-step ${props.tone}`}>
       <span>{props.label}</span>
       <strong>{props.value}</strong>
+      {props.hint && <span className="step-hint">{props.hint}</span>}
     </div>
   );
 }

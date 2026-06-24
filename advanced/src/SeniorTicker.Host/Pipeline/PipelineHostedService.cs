@@ -6,13 +6,18 @@ using SeniorTicker.Processing;
 namespace SeniorTicker.Host.Pipeline;
 
 /// <summary>
-/// Владелец жизненного цикла конвейера. <c>StartAsync</c> запускает <see cref="TickPipeline.RunAsync"/>
-/// на <b>внутреннем abort-токене</b> (НЕ host-stop): штатный дренаж управляется <c>Input.Complete()</c>,
-/// а не отменой (отмена = abort, потеря буфера). <c>StopAsync</c> — фаза ② §5.4: коннекторы уже
-/// погашены (зарегистрированы позже → остановлены раньше), завершаем вход и ждём естественный дренаж
-/// в пределах <see cref="ShutdownConfig.DrainTimeoutSeconds"/>; превышение → форс-abort с громким логом.
-/// Fail-fast (#C1): фолт конвейера (фатал sink'а) → <c>Critical</c> + StopApplication; в <c>StopAsync</c>
-/// он ре-сёрфейсится РОВНО один раз для ненулевого exit (см. явные ветки ниже).
+/// Владелец жизненного цикла конвейера. StartAsync запускает <see cref="TickPipeline.RunAsync"/> на
+/// собственном токене отмены, а не на токене остановки хоста. Штатная остановка идёт через
+/// <c>Input.Complete()</c>, а не через отмену: отмена означала бы потерю буфера.
+///
+/// StopAsync это вторая фаза остановки. Коннекторы к этому моменту уже погашены (они зарегистрированы
+/// позже, поэтому останавливаются раньше). Закрываем вход и ждём, пока конвейер дочитает остаток, в
+/// пределах <see cref="ShutdownConfig.DrainTimeoutSeconds"/>. Если не успел, принудительно отменяем и
+/// пишем явную ошибку в лог.
+///
+/// Если конвейер падает на ходу (например, отказал sink), это фатальный сбой: пишем Critical и
+/// останавливаем приложение. В StopAsync такой сбой пробрасывается ровно один раз, чтобы код выхода
+/// был ненулевым (см. ветки ниже).
 /// </summary>
 public sealed class PipelineHostedService(
     TickPipeline pipeline,
@@ -28,20 +33,31 @@ public sealed class PipelineHostedService(
     {
         _run = pipeline.RunAsync(_abort.Token);
 
-        // fail-fast: если конвейер падает на ходу (мёртвый sink), не оставляем коннекторы лить
-        // в заблокированный канал — валим приложение корректным StopApplication (#C1).
-        _ = _run.ContinueWith(
-            t =>
-            {
-                logger.LogCritical(t.Exception, "Pipeline faulted — stopping application.");
-                lifetime.StopApplication();
-            },
-            CancellationToken.None,
-            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
+        // fail-fast: если конвейер падает на ходу (отказал sink), не оставляем коннекторы лить в
+        // заблокированный канал. Отдельный наблюдатель ждёт _run и при ошибке останавливает приложение.
+        _ = ObservePipelineFaultAsync(_run);
 
         logger.LogInformation("Pipeline started.");
         return Task.CompletedTask;
+    }
+
+    // Ждёт завершения конвейера в фоне. Отмена (штатная или аварийная) это не сбой. Любое другое
+    // исключение это фатальный сбой (например, отказал sink): пишем Critical и останавливаем хост.
+    private async Task ObservePipelineFaultAsync(Task run)
+    {
+        try
+        {
+            await run;
+        }
+        catch (OperationCanceledException)
+        {
+            // штатная остановка или принудительная отмена: приложение не трогаем
+        }
+        catch (Exception ex)
+        {
+            logger.LogCritical(ex, "Pipeline faulted, stopping application.");
+            lifetime.StopApplication();
+        }
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
@@ -49,40 +65,42 @@ public sealed class PipelineHostedService(
         if (_run is null)
             return;
 
-        // ① «больше тиков не будет» → запускает естественный дренаж (router → шарды → батчи → writers)
+        // Закрываем вход: тиков больше не будет. Это запускает дочитывание остатка по конвейеру
+        // (router, шарды, батчи, writers).
         pipeline.Input.Complete();
 
         var drain = TimeSpan.FromSeconds(shutdown.DrainTimeoutSeconds);
         try
         {
-            // ② ждём дренаж в пределах drain-дедлайна на инъектированном TimeProvider (детерминизм в тестах).
-            // НЕ дёргаем abort — это штатный путь. Чистое завершение — единственное место «drained cleanly».
+            // Ждём дочитывания остатка в пределах дедлайна; время берём из TimeProvider (детерминизм
+            // в тестах). Токен принудительной отмены тут не трогаем: это штатный путь, конвейер
+            // завершается сам.
             await _run.WaitAsync(drain, time, cancellationToken);
             logger.LogInformation("Pipeline drained cleanly.");
             return;
         }
         catch (TimeoutException)
         {
-            logger.LogError("Drain exceeded {Drain}s — forcing abort; buffered ticks may be lost.",
+            logger.LogError("Drain exceeded {Drain}s, forcing abort; buffered ticks may be lost.",
                 shutdown.DrainTimeoutSeconds);
         }
         catch (OperationCanceledException)
         {
-            // host ShutdownTimeout исчерпан раньше нашего drain — форсим
-            logger.LogError("Shutdown deadline hit before drain completed — forcing abort.");
+            // Дедлайн остановки хоста исчерпан раньше нашего, принудительно отменяем.
+            logger.LogError("Shutdown deadline hit before drain completed, forcing abort.");
         }
         catch (Exception ex)
         {
-            // Фатал конвейера (#C1: мёртвый sink) всплыл из WaitAsync — это НЕ таймаут и НЕ отмена.
-            // Единственная точка ре-сёрфейса на fault-пути: поднимаем, чтобы exit был ненулевым.
-            logger.LogError(ex, "Pipeline faulted on shutdown — surfacing for non-zero exit.");
+            // Фатальный сбой конвейера (отказал sink) всплыл из WaitAsync: это не таймаут и не отмена.
+            // Единственное место, где пробрасываем такой сбой на этом пути, чтобы код выхода был ненулевым.
+            logger.LogError(ex, "Pipeline faulted on shutdown, surfacing for non-zero exit.");
             throw;
         }
 
-        // Сюда попадаем только по Timeout/OCE: форсируем abort и наблюдаем результат.
+        // Сюда попадаем только по таймауту или отмене: принудительно отменяем и смотрим результат.
         await ForceAbortAsync();
 
-        // Если форс-abort вскрыл фатал (а не чистую отмену) — поднимаем его (вторая, abort-ветка ре-сёрфейса).
+        // Если принудительная отмена вскрыла фатальный сбой, а не чистую отмену, пробрасываем его.
         if (_run.IsFaulted)
             await _run;
     }
@@ -96,11 +114,11 @@ public sealed class PipelineHostedService(
         }
         catch (OperationCanceledException)
         {
-            // ожидаемо при форс-abort — чистая отмена
+            // Ожидаемо при принудительной отмене: чистая отмена.
         }
         catch (Exception)
         {
-            // фатал НЕ глотаем: _run.IsFaulted останется true → переподнимется в StopAsync
+            // Фатальный сбой не глотаем: _run.IsFaulted останется true, и StopAsync пробросит его.
         }
     }
 

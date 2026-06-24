@@ -9,10 +9,10 @@ using SeniorTicker.Infrastructure.WebSockets.Parsers;
 namespace SeniorTicker.Host.Ingestion;
 
 /// <summary>
-/// Строит коннекторы из конфига: только <b>enabled</b> (#9), парсер по <see cref="ExchangeFormat"/>
-/// (OCP — новая биржа = новая ветка + класс парсера), повторная wss-валидация URL (defense-in-depth,
-/// #9 + кольцо 1). Socket-factory отдаёт <see cref="ClientWebSocket"/> с дефолтной валидацией
-/// сертификата (кольцо 1 — НИКОГДА не подменяем callback на <c>return true</c>).
+/// Строит коннекторы из конфига: только включённые, парсер по <see cref="ExchangeFormat"/> (новая
+/// биржа это новая ветка плюс класс парсера), плюс повторная проверка wss-URL (защита в несколько
+/// слоёв). Socket-factory отдаёт <see cref="ClientWebSocket"/> с дефолтной проверкой сертификата:
+/// никогда не подменяем callback на <c>return true</c>.
 /// </summary>
 public sealed class ConnectorFactory(
     ITickIngestor ingestor,

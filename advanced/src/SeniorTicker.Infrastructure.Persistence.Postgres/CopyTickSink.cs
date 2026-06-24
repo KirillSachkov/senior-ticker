@@ -18,11 +18,15 @@ public sealed class CopyTickSink(NpgsqlDataSource dataSource) : ITickSink
 
     public async Task WriteBatchAsync(ReadOnlyMemory<Tick> batch, CancellationToken ct)
     {
+        // Шаг 1. Пустой батч: писать нечего.
         if (batch.IsEmpty) return;
 
+        // Шаг 2. Берём своё соединение из пула и открываем бинарный COPY. Соединение на каждый вызов,
+        // поэтому K writer-воркеров пишут параллельно, без общего DbContext.
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         await using var writer = await conn.BeginBinaryImportAsync(CopyCommand, ct);
 
+        // Шаг 3. Пишем каждый тик одной строкой: StartRow, затем поля строго в порядке колонок из CopyCommand.
         for (var i = 0; i < batch.Length; i++)
         {
             var t = batch.Span[i];
@@ -39,6 +43,7 @@ public sealed class CopyTickSink(NpgsqlDataSource dataSource) : ITickSink
             await writer.WriteAsync(t.IngestTimestamp.ToUniversalTime(), NpgsqlDbType.TimestampTz, ct);
         }
 
-        await writer.CompleteAsync(ct); // без Complete COPY откатывается
+        // Шаг 4. CompleteAsync фиксирует COPY. Без него вся пачка откатывается.
+        await writer.CompleteAsync(ct);
     }
 }

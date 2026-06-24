@@ -300,6 +300,12 @@ input[type="range"] {
   color: var(--purple);
 }
 
+.pipeline-step .step-hint {
+  font-size: 11px;
+  line-height: 1.25;
+  opacity: 0.7;
+}
+
 .numbers-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

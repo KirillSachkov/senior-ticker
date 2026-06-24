@@ -60,7 +60,7 @@ public class PipelineHostedServiceTests
     [Fact]
     public async Task Sink_fault_triggers_failfast_stop_application_and_resurfaces()
     {
-        // #C1: мёртвый sink → конвейер фолтится → continuation зовёт StopApplication, StopAsync поднимает фатал.
+        // #C1: мёртвый sink → конвейер фолтится → наблюдатель зовёт StopApplication, StopAsync поднимает фатал.
         var pipeline = new TickPipeline(FastOptions(), new ThrowingTickSink(), new MetricsSink(), TimeProvider.System);
         var lifetime = new FakeLifetime();
         using var svc = NewService(pipeline, lifetime, TimeProvider.System);

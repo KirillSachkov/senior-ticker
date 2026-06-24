@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using OpenTelemetry.Metrics;
 using Serilog;
 using SeniorTicker.Application;
 using SeniorTicker.Host.Configuration;
@@ -17,7 +18,7 @@ namespace SeniorTicker.Host;
 
 /// <summary>
 /// Composition root: единственное место, где сходятся конфиг, секреты, Serilog, DI и порядок
-/// хостед-сервисов. Порядок регистрации хостед-сервисов = хореография двухфазного дренажа (§5.4):
+/// хостед-сервисов. Порядок регистрации хостед-сервисов = хореография двухфазной остановки (§5.4):
 /// DbInit (миграции до writers, #10) → Metrics → Pipeline → Connectors (стоп ПЕРВЫМ, #5/#6).
 /// </summary>
 public static class HostingExtensions
@@ -46,7 +47,7 @@ public static class HostingExtensions
             .ValidateOnStart();
         builder.Services.AddSingleton<IValidateOptions<SeniorTickerOptions>, SeniorTickerOptionsValidator>();
 
-        // Двухфазный дренаж требует ShutdownTimeout > drain и СТРОГО последовательного LIFO-останова.
+        // Двухфазная остановка требует ShutdownTimeout > drain и СТРОГО последовательного LIFO-останова.
         // clamp — defense-in-depth: валидатор завалит <=0 на ValidateOnStart, но HostOptions считается
         // на build, и misconfig не должен схлопнуть бюджет хоста до 5с раньше срабатывания валидатора.
         var drainSeconds = Math.Max(1, builder.Configuration.GetValue<int?>("Shutdown:DrainTimeoutSeconds") ?? 30);
@@ -64,12 +65,25 @@ public static class HostingExtensions
             sp.GetRequiredService<IOptions<SeniorTickerOptions>>().Value.Pipeline.ToOptions());
         builder.Services.AddSingleton(sp =>
             sp.GetRequiredService<IOptions<SeniorTickerOptions>>().Value.Shutdown);
-        builder.Services.AddSingleton(sp =>
-            sp.GetRequiredService<IOptions<SeniorTickerOptions>>().Value.Metrics);
 
-        // Метрики (#7): один экземпляр и как concrete (snapshot для фонового сервиса), и как порт.
+        // Метрики (#7): один MetricsSink — и concrete (Meter, на который PipelineMetrics вешает gauge'ы
+        // глубины канала), и как порт IMetricsSink для конвейера. Инструменты — стандартные Counter'ы OTel.
         builder.Services.AddSingleton<MetricsSink>();
         builder.Services.AddSingleton<IMetricsSink>(sp => sp.GetRequiredService<MetricsSink>());
+
+        // OpenTelemetry MeterProvider: раз в Metrics:IntervalSeconds экспортирует метрики Meter
+        // "SeniorTicker" в консоль в стандартном формате (без внешнего бэкенда). Delta печатает прирост
+        // за интервал (как прежняя строка дельт); gap = received − written и rate считает потребитель.
+        // OTLP/Prometheus-экспортёр подключается тем же WithMetrics, без правок конвейера.
+        var metricsIntervalMs = 1000 * Math.Max(1,
+            builder.Configuration.GetValue<int?>("Metrics:IntervalSeconds") ?? 1);
+        builder.Services.AddOpenTelemetry().WithMetrics(metrics => metrics
+            .AddMeter(MetricsSink.MeterName)
+            .AddConsoleExporter((_, reader) =>
+            {
+                reader.TemporalityPreference = MetricReaderTemporalityPreference.Delta;
+                reader.PeriodicExportingMetricReaderOptions.ExportIntervalMilliseconds = metricsIntervalMs;
+            }));
 
         // Конвейер + producer-seam + фабрика коннекторов.
         builder.Services.AddSingleton<TickPipeline>();
@@ -103,7 +117,7 @@ public static class HostingExtensions
 
         // Хостед-сервисы — ПОРЯДОК = хореография §5.4 (старт сверху-вниз, останов снизу-вверх).
         builder.Services.AddHostedService<DatabaseInitializerHostedService>();   // (1) миграции до writers (#10)
-        builder.Services.AddHostedService<MetricsBackgroundService>();           // (2) метрики (живут до конца дренажа)
+        builder.Services.AddHostedService<PipelineMetrics>();                    // (2) метрики: gauge'ы глубины (живут до конца остановки)
         builder.Services.AddSingleton<PipelineHostedService>();
         builder.Services.AddHostedService(sp => sp.GetRequiredService<PipelineHostedService>()); // (3) конвейер
         builder.Services.AddHostedService<ConnectorHostedService>();             // (4) коннекторы → стоп ПЕРВЫМ (#5/#6)
